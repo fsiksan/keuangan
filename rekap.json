@@ -6,6 +6,10 @@
   "analisaSheetName": "Analisa",
   "credentialsFile": "./rekap-credentials.json",
   "timezone": "Asia/Jakarta",
+  "llmProvider": "claude",
   "anthropicApiKey": "",
-  "anthropicModel": "claude-opus-4-8"
+  "anthropicModel": "claude-opus-4-8",
+  "openaiBaseUrl": "https://api.openai.com/v1",
+  "openaiApiKey": "",
+  "openaiModel": "gpt-4o"
 }

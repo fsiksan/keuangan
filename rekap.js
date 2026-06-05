@@ -697,49 +697,88 @@ async function updateAnalisaSheet() {
   };
 }
 
-async function parseReceiptImage(base64Data, mediaType) {
+const RECEIPT_PROMPT =
+  'Kamu adalah asisten pencatat keuangan. Baca foto struk belanja ini dan ' +
+  'ekstrak detailnya. Kembalikan total akhir yang dibayar (grand total) dalam ' +
+  'angka Rupiah tanpa titik/koma. Tentukan nama toko, tanggal transaksi ' +
+  '(format DD/MM/YYYY, kosongkan jika tidak ada), dan kategori pengeluaran yang ' +
+  'sesuai (contoh: Belanja, Makan, Transport, Kesehatan, Lainnya). Jika gambar ' +
+  'bukan struk/nota, set is_receipt = false.';
+
+const RECEIPT_SCHEMA = {
+  type: 'object',
+  properties: {
+    is_receipt: { type: 'boolean' },
+    toko: { type: 'string' },
+    tanggal: { type: 'string' },
+    kategori: { type: 'string' },
+    total: { type: 'number' },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          nama: { type: 'string' },
+          harga: { type: 'number' }
+        },
+        required: ['nama', 'harga'],
+        additionalProperties: false
+      }
+    }
+  },
+  required: ['is_receipt', 'toko', 'tanggal', 'kategori', 'total', 'items'],
+  additionalProperties: false
+};
+
+const RECEIPT_JSON_HINT =
+  '\n\nKembalikan HANYA JSON valid (tanpa teks lain, tanpa markdown) dengan ' +
+  'bentuk persis:\n' +
+  '{"is_receipt": boolean, "toko": string, "tanggal": string, ' +
+  '"kategori": string, "total": number, ' +
+  '"items": [{"nama": string, "harga": number}]}';
+
+function getLlmProvider() {
+  if (config.llmProvider) return String(config.llmProvider).toLowerCase();
+  if (config.openaiApiKey || process.env.OPENAI_API_KEY) return 'openai';
+  return 'claude';
+}
+
+function isLlmConfigured() {
+  if (getLlmProvider() === 'openai') {
+    return !!(config.openaiApiKey || process.env.OPENAI_API_KEY);
+  }
+  return !!anthropic;
+}
+
+function extractJsonObject(text) {
+  if (!text) throw new Error('Respons LLM kosong');
+
+  let cleaned = String(text).trim();
+  // Buang pembungkus markdown ```json ... ``` jika ada
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      return JSON.parse(cleaned.slice(start, end + 1));
+    }
+    throw new Error('Gagal mem-parse JSON dari respons LLM');
+  }
+}
+
+async function parseReceiptWithClaude(base64Data, mediaType) {
   if (!anthropic) {
     throw new Error('anthropicApiKey di rekap.json belum diisi');
   }
-
-  const prompt =
-    'Kamu adalah asisten pencatat keuangan. Baca foto struk belanja ini dan ' +
-    'ekstrak detailnya. Kembalikan total akhir yang dibayar (grand total) dalam ' +
-    'angka Rupiah tanpa titik/koma. Tentukan nama toko, tanggal transaksi ' +
-    '(format DD/MM/YYYY, kosongkan jika tidak ada), dan kategori pengeluaran yang ' +
-    'sesuai (contoh: Belanja, Makan, Transport, Kesehatan, Lainnya). Jika gambar ' +
-    'bukan struk/nota, set is_receipt = false.';
-
-  const schema = {
-    type: 'object',
-    properties: {
-      is_receipt: { type: 'boolean' },
-      toko: { type: 'string' },
-      tanggal: { type: 'string' },
-      kategori: { type: 'string' },
-      total: { type: 'number' },
-      items: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            nama: { type: 'string' },
-            harga: { type: 'number' }
-          },
-          required: ['nama', 'harga'],
-          additionalProperties: false
-        }
-      }
-    },
-    required: ['is_receipt', 'toko', 'tanggal', 'kategori', 'total', 'items'],
-    additionalProperties: false
-  };
 
   const response = await anthropic.messages.create({
     model: config.anthropicModel || 'claude-opus-4-8',
     max_tokens: 2048,
     output_config: {
-      format: { type: 'json_schema', schema }
+      format: { type: 'json_schema', schema: RECEIPT_SCHEMA }
     },
     messages: [
       {
@@ -753,7 +792,7 @@ async function parseReceiptImage(base64Data, mediaType) {
               data: base64Data
             }
           },
-          { type: 'text', text: prompt }
+          { type: 'text', text: RECEIPT_PROMPT }
         ]
       }
     ]
@@ -764,7 +803,72 @@ async function parseReceiptImage(base64Data, mediaType) {
     throw new Error('Tidak ada respons teks dari pembaca struk');
   }
 
-  return JSON.parse(textBlock.text);
+  return extractJsonObject(textBlock.text);
+}
+
+async function parseReceiptWithOpenAI(base64Data, mediaType) {
+  const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('openaiApiKey di rekap.json belum diisi');
+  }
+
+  const baseUrl = (config.openaiBaseUrl || 'https://api.openai.com/v1')
+    .replace(/\/+$/, '');
+  const model = config.openaiModel || 'gpt-4o';
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2048,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: RECEIPT_PROMPT + RECEIPT_JSON_HINT },
+            {
+              type: 'image_url',
+              image_url: { url: `data:${mediaType};base64,${base64Data}` }
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`LLM error ${res.status}: ${detail.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const content = data?.choices?.[0]?.message?.content;
+
+  if (typeof content === 'string') {
+    return extractJsonObject(content);
+  }
+
+  // Sebagian provider mengembalikan content sebagai array blok
+  if (Array.isArray(content)) {
+    const textPart = content
+      .map((c) => (typeof c === 'string' ? c : c?.text || ''))
+      .join('');
+    return extractJsonObject(textPart);
+  }
+
+  throw new Error('Format respons LLM tidak dikenali');
+}
+
+async function parseReceiptImage(base64Data, mediaType) {
+  if (getLlmProvider() === 'openai') {
+    return parseReceiptWithOpenAI(base64Data, mediaType);
+  }
+  return parseReceiptWithClaude(base64Data, mediaType);
 }
 
 async function getUsdtToIdrRate() {
@@ -1225,9 +1329,10 @@ bot.on(['photo', 'document'], async (ctx) => {
   try {
     if (!(await guardOwner(ctx))) return;
 
-    if (!anthropic) {
+    if (!isLlmConfigured()) {
       return ctx.reply(
-        'Fitur baca struk belum aktif. Isi "anthropicApiKey" di rekap.json.'
+        'Fitur baca struk belum aktif. Isi API key LLM di rekap.json ' +
+        '(anthropicApiKey untuk Claude, atau openaiApiKey untuk LLM lain).'
       );
     }
 

@@ -79,10 +79,27 @@ npm install telegraf googleapis @anthropic-ai/sdk
 ```
 ---
 ## (Opsional) Fitur Baca Struk Otomatis
-Agar bot bisa membaca foto struk dan mencatat pengeluaran otomatis:
+Agar bot bisa membaca foto struk dan mencatat pengeluaran otomatis, pilih salah
+satu penyedia LLM (vision) lewat `llmProvider` di `rekap.json`.
+
+### Pilihan 1: Claude (Anthropic)
+* `"llmProvider": "claude"`
 * Buat API key di [Anthropic Console](https://console.anthropic.com/)
-* Isi `anthropicApiKey` di `rekap.json` (atau set env `ANTHROPIC_API_KEY`)
-* Kirim/foto struk ke bot, rincian akan dibaca dan dicatat sebagai pengeluaran
+* Isi `anthropicApiKey` (atau env `ANTHROPIC_API_KEY`) dan `anthropicModel`
+
+### Pilihan 2: LLM lain (OpenAI-compatible)
+Cocok untuk OpenAI, OpenRouter, Groq, Together, Gemini (endpoint OpenAI-compatible),
+LLM lokal (Ollama/LM Studio), dll — apa saja yang mendukung endpoint
+`/chat/completions`.
+* `"llmProvider": "openai"`
+* `openaiBaseUrl` — base URL API (contoh: `https://api.openai.com/v1`,
+  `https://openrouter.ai/api/v1`, `http://localhost:11434/v1`)
+* `openaiApiKey` — API key penyedia (atau env `OPENAI_API_KEY`)
+* `openaiModel` — nama model vision (contoh: `gpt-4o`, `gpt-4o-mini`,
+  `google/gemini-2.0-flash-exp`, `llava`)
+
+Setelah dikonfigurasi, kirim/foto struk ke bot; rincian akan dibaca dan dicatat
+sebagai pengeluaran. Pastikan model yang dipilih mendukung input gambar (vision).
 ---
 ## Running
 ```
