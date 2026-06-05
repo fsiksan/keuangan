@@ -698,12 +698,25 @@ async function updateAnalisaSheet() {
 }
 
 const RECEIPT_PROMPT =
-  'Kamu adalah asisten pencatat keuangan. Baca foto struk belanja ini dan ' +
-  'ekstrak detailnya. Kembalikan total akhir yang dibayar (grand total) dalam ' +
-  'angka Rupiah tanpa titik/koma. Tentukan nama toko, tanggal transaksi ' +
-  '(format DD/MM/YYYY, kosongkan jika tidak ada), dan kategori pengeluaran yang ' +
-  'sesuai (contoh: Belanja, Makan, Transport, Kesehatan, Lainnya). Jika gambar ' +
-  'bukan struk/nota, set is_receipt = false.';
+  'Kamu adalah asisten pencatat keuangan yang membaca foto struk/nota/tiket. ' +
+  'Ekstrak data berikut dari gambar dengan teliti:\n' +
+  '- toko: nama toko/merchant sesuai logo atau tulisan paling atas pada struk ' +
+  '(contoh: Indomaret, Alfamart, Warkop Agam, KAI, Starbucks). ' +
+  'Kosongkan jika benar-benar tidak tertera.\n' +
+  '- total: nominal AKHIR yang dibayar. Cari kata "Grand Total", "Total Belanja", ' +
+  '"Total Bayar", atau "Total". Tulis sebagai angka Rupiah tanpa titik/koma/Rp.\n' +
+  '- tanggal: tanggal transaksi pada struk, format DD/MM/YYYY. Kosongkan jika tidak ada.\n' +
+  '- kategori: tentukan dari jenis pembelian. Pilih SALAH SATU:\n' +
+  '   "Makanan" -> makanan/minuman/restoran/warung/kafe/snack,\n' +
+  '   "Transportasi" -> kereta/KAI/tiket/pesawat/bus/bensin/ojek/taksi/parkir/tol,\n' +
+  '   "Belanja" -> minimarket/supermarket/kebutuhan sehari-hari/Indomaret/Alfamart,\n' +
+  '   "Kesehatan" -> apotek/obat/klinik/dokter/rumah sakit,\n' +
+  '   "Hiburan" -> bioskop/game/streaming/wisata,\n' +
+  '   "Tagihan" -> listrik/air/internet/pulsa/paket data,\n' +
+  '   "Lainnya" -> jika tidak cocok kategori di atas.\n' +
+  '- items: daftar barang beserta harganya jika terbaca.\n' +
+  '- is_receipt: true jika gambar adalah struk/nota/tiket pembayaran, selain itu false.\n' +
+  'Jika sebagian teks buram, tetap tebak sebaik mungkin dari konteks.';
 
 const RECEIPT_SCHEMA = {
   type: 'object',
@@ -748,6 +761,17 @@ function isLlmConfigured() {
     return !!(config.openaiApiKey || process.env.OPENAI_API_KEY);
   }
   return !!anthropic;
+}
+
+function coerceAmountNumber(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.round(value) : 0;
+  }
+  if (typeof value === 'string') {
+    const digits = value.replace(/[^\d]/g, '');
+    return digits ? Number(digits) : 0;
+  }
+  return 0;
 }
 
 function extractJsonObject(text) {
@@ -1426,14 +1450,19 @@ bot.on(['photo', 'document'], async (ctx) => {
     const base64Data = buffer.toString('base64');
 
     const parsed = await parseReceiptImage(base64Data, mediaType);
+    logInfo('Hasil baca struk: ' + JSON.stringify(parsed));
 
-    if (!parsed || !parsed.is_receipt) {
-      return ctx.reply('Gambar ini sepertinya bukan struk. Coba foto yang lebih jelas.');
-    }
-
-    const total = Number(parsed.total);
+    // Jika total terbaca, anggap struk valid (model benar-benar "melihat" gambar).
+    const total = parsed ? coerceAmountNumber(parsed.total) : 0;
     if (!total || total <= 0) {
-      return ctx.reply('Total pada struk tidak terbaca. Coba foto yang lebih jelas.');
+      return ctx.reply(
+        'Tidak bisa membaca total dari struk.\n' +
+        'Cek dua hal:\n' +
+        '1) Pastikan foto struk jelas (tidak buram/gelap).\n' +
+        '2) Pastikan model AI mendukung input gambar (vision). ' +
+        'Model teks biasa (mis. MiniMax teks) tidak bisa membaca foto.\n' +
+        'Rekomendasi model vision: gemini-2.0-flash, gpt-4o-mini, atau Claude.'
+      );
     }
 
     await ensureHeader();
@@ -1465,8 +1494,8 @@ bot.on(['photo', 'document'], async (ctx) => {
       lines.push('');
       lines.push('Rincian:');
       for (const item of parsed.items.slice(0, 20)) {
-        const harga = Number(item.harga) || 0;
-        lines.push(`- ${item.nama}: Rp${Math.round(harga).toLocaleString('id-ID')}`);
+        const harga = coerceAmountNumber(item.harga);
+        lines.push(`- ${item.nama}: Rp${harga.toLocaleString('id-ID')}`);
       }
     }
 

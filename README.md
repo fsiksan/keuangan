@@ -98,8 +98,32 @@ LLM lokal (Ollama/LM Studio), dll — apa saja yang mendukung endpoint
 * `openaiModel` — nama model vision (contoh: `gpt-4o`, `gpt-4o-mini`,
   `google/gemini-2.0-flash-exp`, `llava`)
 
-Setelah dikonfigurasi, kirim/foto struk ke bot; rincian akan dibaca dan dicatat
-sebagai pengeluaran. Pastikan model yang dipilih mendukung input gambar (vision).
+> ⚠️ **PENTING: model harus mendukung gambar (vision/multimodal).**
+> Model teks biasa (mis. **MiniMax teks**, Llama text, DeepSeek-Chat) **tidak bisa
+> membaca foto** — bot akan selalu balas "tidak bisa membaca struk".
+
+### Rekomendasi model vision (bagus untuk baca struk)
+
+| Model | Penyedia | `openaiBaseUrl` | `openaiModel` |
+|-------|----------|-----------------|---------------|
+| Gemini 2.0 Flash (murah, OCR bagus) | [Google AI Studio](https://aistudio.google.com/apikey) | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` |
+| GPT-4o mini | [OpenAI](https://platform.openai.com/) | `https://api.openai.com/v1` | `gpt-4o-mini` |
+| via OpenRouter | [OpenRouter](https://openrouter.ai/) | `https://openrouter.ai/api/v1` | `google/gemini-2.0-flash-001` atau `openai/gpt-4o-mini` |
+| Claude (Haiku/Sonnet) | Anthropic | gunakan `llmProvider: "claude"` | `claude-haiku-4-5` / `claude-sonnet-4-6` |
+
+Contoh `rekap.json` memakai Gemini (murah & jago OCR):
+```json
+{
+  "llmProvider": "openai",
+  "openaiBaseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+  "openaiApiKey": "AI...kunci-google-ai-studio",
+  "openaiModel": "gemini-2.0-flash"
+}
+```
+
+Bot akan otomatis menentukan **toko** (dari logo/nama di struk) dan **kategori**
+(Makanan, Transportasi, Belanja, Kesehatan, Hiburan, Tagihan, Lainnya) lalu
+mencatatnya sebagai pengeluaran.
 ---
 ## Running
 ```
