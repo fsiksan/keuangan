@@ -75,8 +75,14 @@ nano rekap.json
 ## Install Modul
 ```
 npm init -y
-npm install telegraf googleapis
+npm install telegraf googleapis @anthropic-ai/sdk
 ```
+---
+## (Opsional) Fitur Baca Struk Otomatis
+Agar bot bisa membaca foto struk dan mencatat pengeluaran otomatis:
+* Buat API key di [Anthropic Console](https://console.anthropic.com/)
+* Isi `anthropicApiKey` di `rekap.json` (atau set env `ANTHROPIC_API_KEY`)
+* Kirim/foto struk ke bot, rincian akan dibaca dan dicatat sebagai pengeluaran
 ---
 ## Running
 ```
@@ -89,8 +95,11 @@ node rekap.js
 |----------|-------------|
 | /start | Start bot and show examples |
 | /help | Show transaction format |
+| /hari | Show today's report |
+| /hari DD MM YYYY | Show report for specific day |
 | /bulan | Show current month report |
 | /bulan MM YYYY | Show report for specific month |
+| /analisa | Build & show financial analysis summary |
 
 ## Transaction Examples
 
@@ -100,4 +109,17 @@ node rekap.js
 * keluar wifi 250k
 * keluar rokok 30k
 * keluar bensin 50rb
+
+## Foto Struk
+
+Kirim atau upload foto struk ke bot. Bot akan otomatis membaca nama toko,
+tanggal, kategori, dan total, lalu menyimpannya sebagai pengeluaran.
+
+## Kolom Spreadsheet
+
+| Tanggal | Kategori | Toko | Pemasukan | Pengeluaran |
+|---------|----------|------|-----------|-------------|
+
+Sheet **Analisa** dibuat otomatis dan berisi ringkasan total pemasukan,
+pengeluaran, saldo, pengeluaran per kategori, per toko, dan ringkasan per bulan.
 ---

@@ -3,6 +3,9 @@
   "ownerUserId": "chatid",
   "spreadsheetId": "idsheet",
   "sheetName": "Sheet1",
+  "analisaSheetName": "Analisa",
   "credentialsFile": "./rekap-credentials.json",
-  "timezone": "Asia/Jakarta"
+  "timezone": "Asia/Jakarta",
+  "anthropicApiKey": "",
+  "anthropicModel": "claude-opus-4-8"
 }
