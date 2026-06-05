@@ -1026,6 +1026,8 @@ async function parseTransaction(text) {
     typeMatch[1].toLowerCase() === 'masuk' ? 'pemasukan' : 'pengeluaran';
   const body = raw.slice(typeMatch[0].length).trim();
 
+  if (!body) return null;
+
   // Format berlabel: "keluar toko=warung Agam kategori=makan 318000"
   if (/\b(?:toko|kategori)\s*[:=]/i.test(body)) {
     const amountRe =
@@ -1045,50 +1047,51 @@ async function parseTransaction(text) {
     return {
       type,
       category: category || 'Lainnya',
-      toko,
+      toko: toko || 'Lainnya',
       amountText
     };
   }
 
-  // Format posisi (lama): "keluar rokok 29k" / "keluar 29k rokok"
-  const lower = raw.toLowerCase();
+  // Format sederhana / posisi:
+  // "keluar makan 100000"               -> kategori=makan, toko=Lainnya
+  // "keluar makan 100000 di warung agam" -> kategori=makan, toko=warung agam
+  // "keluar 29k rokok"                  -> kategori=rokok, toko=Lainnya (format lama)
+  const AMOUNT =
+    '(?:rp\\s*)?\\$?[\\d.,]+(?:\\s*(?:k|rb|ribu|jt|juta|idr|rp|usd|usdt))?';
 
-  const typeMap = {
-    masuk: 'pemasukan',
-    keluar: 'pengeluaran'
-  };
+  // Kategori dulu, lalu nominal, opsional "di <toko>"
+  const categoryFirst = new RegExp(
+    `^(.+?)\\s+(${AMOUNT})(?:\\s+di\\s+(.+))?$`,
+    'i'
+  );
+  // Nominal dulu, lalu kategori (format lama)
+  const amountFirst = new RegExp(`^(${AMOUNT})\\s+(.+)$`, 'i');
 
-  const patterns = [
-    /^(masuk|keluar)\s+(.+?)\s+((?:rp\s*)?\$?[\d.,]+(?:\s*(?:k|rb|ribu|jt|juta|idr|rp|usd|usdt))?)$/i,
-    /^(masuk|keluar)\s+((?:rp\s*)?\$?[\d.,]+(?:\s*(?:k|rb|ribu|jt|juta|idr|rp|usd|usdt))?)\s+(.+)$/i
-  ];
+  let category = '';
+  let toko = '';
+  let amountTextRaw = '';
 
-  for (let i = 0; i < patterns.length; i++) {
-    const match = lower.match(patterns[i]);
-    if (!match) continue;
-
-    const rawType = match[1].trim().toLowerCase();
-    const mappedType = typeMap[rawType];
-
-    let category = '';
-    let amountTextRaw = '';
-
-    if (i === 0) {
-      category = match[2].trim();
-      amountTextRaw = match[3].trim();
-    } else {
-      amountTextRaw = match[2].trim();
-      category = match[3].trim();
-    }
-
-    const amountText = await parseMoneyText(amountTextRaw);
-
-    if (!mappedType || !category || !amountText) continue;
-
-    return { type: mappedType, category, toko: '', amountText };
+  const m1 = body.match(categoryFirst);
+  if (m1) {
+    category = m1[1].trim();
+    amountTextRaw = m1[2].trim();
+    toko = (m1[3] || '').trim();
+  } else {
+    const m2 = body.match(amountFirst);
+    if (!m2) return null;
+    amountTextRaw = m2[1].trim();
+    category = m2[2].trim();
   }
 
-  return null;
+  const amountText = await parseMoneyText(amountTextRaw);
+  if (!category || !amountText) return null;
+
+  return {
+    type,
+    category,
+    toko: toko || 'Lainnya',
+    amountText
+  };
 }
 
 bot.start(async (ctx) => {
@@ -1097,19 +1100,18 @@ bot.start(async (ctx) => {
   return ctx.reply(
     'Bot rekap keuangan pribadi aktif.\n' +
     'Contoh:\n' +
-    '- masuk airdrop 1,5 jt\n' +
-    '- keluar rokok 29k\n' +
-    '- masuk airdrop 20 usdt\n' +
-    '- masuk $10 freelance\n' +
+    '- keluar makan 100000 (toko otomatis "Lainnya")\n' +
+    '- keluar makan 100000 di warung agam\n' +
+    '- masuk gaji 5jt\n' +
     '- keluar wifi 150000\n' +
-    '- keluar toko=warung Agam kategori=makan 318000\n' +
     '\n' +
     'Kirim/foto struk untuk dicatat otomatis 🧾\n' +
     '\n' +
     'Perintah:\n' +
     '/hari - rekap hari ini\n' +
     '/bulan - rekap bulan ini\n' +
-    '/analisa - ringkasan analisa keuangan'
+    '/analisa - ringkasan analisa keuangan\n' +
+    '/help - bantuan lengkap'
   );
 });
 
@@ -1117,20 +1119,26 @@ bot.command('help', async (ctx) => {
   if (!(await guardOwner(ctx))) return;
 
   return ctx.reply(
-    'Format transaksi:\n' +
-    '- masuk airdrop 1,5 jt\n' +
-    '- masuk 1,5 jt airdrop\n' +
-    '- keluar rokok 29k\n' +
-    '- keluar 29k rokok\n' +
-    '- masuk airdrop 20 usdt\n' +
-    '- masuk 20 usdt airdrop\n' +
-    '- masuk $10 freelance\n' +
-    '- keluar wifi 150000\n' +
+    'Cara catat transaksi:\n' +
+    'keluar <kategori> <nominal>\n' +
+    'keluar <kategori> <nominal> di <toko>\n' +
+    'masuk <kategori> <nominal>\n' +
     '\n' +
-    'Pakai label toko & kategori (urutan bebas):\n' +
+    'Kalau toko tidak ditulis, otomatis jadi "Lainnya".\n' +
+    '\n' +
+    'Contoh:\n' +
+    '- keluar makan 100000\n' +
+    '   → kategori=makan, toko=Lainnya\n' +
+    '- keluar makan 100000 di warung agam\n' +
+    '   → kategori=makan, toko=warung agam\n' +
+    '- keluar bensin 50rb di SPBU Shell\n' +
+    '- keluar wifi 150000\n' +
+    '- masuk gaji 5jt\n' +
+    '- masuk airdrop 20 usdt\n' +
+    '- masuk $10 freelance\n' +
+    '\n' +
+    'Format label (urutan bebas) juga didukung:\n' +
     '- keluar toko=warung Agam kategori=makan 318000\n' +
-    '- keluar kategori=bensin toko=SPBU 50rb\n' +
-    '- masuk kategori=gaji 5jt\n' +
     '\n' +
     'Foto/upload struk: otomatis dibaca & dicatat sebagai pengeluaran.\n' +
     '\n' +
