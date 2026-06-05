@@ -1047,7 +1047,7 @@ async function parseTransaction(text) {
     return {
       type,
       category: category || 'Lainnya',
-      toko: toko || 'Lainnya',
+      toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
       amountText
     };
   }
@@ -1089,7 +1089,7 @@ async function parseTransaction(text) {
   return {
     type,
     category,
-    toko: toko || 'Lainnya',
+    toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
     amountText
   };
 }
