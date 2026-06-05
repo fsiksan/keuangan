@@ -1006,8 +1006,52 @@ async function parseMoneyText(input) {
   return 'Rp' + finalAmount.toLocaleString('id-ID');
 }
 
+function extractLabeledField(text, key) {
+  // Ambil nilai "key=..." (atau "key:...") sampai ketemu label lain atau akhir.
+  const re = new RegExp(
+    `\\b${key}\\s*[:=]\\s*(.+?)(?=\\s+(?:toko|kategori)\\s*[:=]|$)`,
+    'i'
+  );
+  const m = text.match(re);
+  return m ? m[1].trim() : '';
+}
+
 async function parseTransaction(text) {
-  let raw = text.toLowerCase().replace(/\s+/g, ' ').trim();
+  const raw = text.replace(/\s+/g, ' ').trim();
+
+  const typeMatch = raw.match(/^(masuk|keluar)\b\s*/i);
+  if (!typeMatch) return null;
+
+  const type =
+    typeMatch[1].toLowerCase() === 'masuk' ? 'pemasukan' : 'pengeluaran';
+  const body = raw.slice(typeMatch[0].length).trim();
+
+  // Format berlabel: "keluar toko=warung Agam kategori=makan 318000"
+  if (/\b(?:toko|kategori)\s*[:=]/i.test(body)) {
+    const amountRe =
+      /\s+((?:rp\s*)?\$?\d[\d.,]*\s*(?:k|rb|ribu|jt|juta|idr|rp|usd|usdt)?)\s*$/i;
+    const amountMatch = body.match(amountRe);
+    if (!amountMatch) return null;
+
+    const amountText = await parseMoneyText(amountMatch[1].trim());
+    if (!amountText) return null;
+
+    const fields = body.slice(0, amountMatch.index).trim();
+    const toko = extractLabeledField(fields, 'toko');
+    const category = extractLabeledField(fields, 'kategori');
+
+    if (!category && !toko) return null;
+
+    return {
+      type,
+      category: category || 'Lainnya',
+      toko,
+      amountText
+    };
+  }
+
+  // Format posisi (lama): "keluar rokok 29k" / "keluar 29k rokok"
+  const lower = raw.toLowerCase();
 
   const typeMap = {
     masuk: 'pemasukan',
@@ -1020,11 +1064,11 @@ async function parseTransaction(text) {
   ];
 
   for (let i = 0; i < patterns.length; i++) {
-    const match = raw.match(patterns[i]);
+    const match = lower.match(patterns[i]);
     if (!match) continue;
 
     const rawType = match[1].trim().toLowerCase();
-    const type = typeMap[rawType];
+    const mappedType = typeMap[rawType];
 
     let category = '';
     let amountTextRaw = '';
@@ -1039,9 +1083,9 @@ async function parseTransaction(text) {
 
     const amountText = await parseMoneyText(amountTextRaw);
 
-    if (!type || !category || !amountText) continue;
+    if (!mappedType || !category || !amountText) continue;
 
-    return { type, category, amountText };
+    return { type: mappedType, category, toko: '', amountText };
   }
 
   return null;
@@ -1058,6 +1102,7 @@ bot.start(async (ctx) => {
     '- masuk airdrop 20 usdt\n' +
     '- masuk $10 freelance\n' +
     '- keluar wifi 150000\n' +
+    '- keluar toko=warung Agam kategori=makan 318000\n' +
     '\n' +
     'Kirim/foto struk untuk dicatat otomatis 🧾\n' +
     '\n' +
@@ -1081,6 +1126,11 @@ bot.command('help', async (ctx) => {
     '- masuk 20 usdt airdrop\n' +
     '- masuk $10 freelance\n' +
     '- keluar wifi 150000\n' +
+    '\n' +
+    'Pakai label toko & kategori (urutan bebas):\n' +
+    '- keluar toko=warung Agam kategori=makan 318000\n' +
+    '- keluar kategori=bensin toko=SPBU 50rb\n' +
+    '- masuk kategori=gaji 5jt\n' +
     '\n' +
     'Foto/upload struk: otomatis dibaca & dicatat sebagai pengeluaran.\n' +
     '\n' +
@@ -1452,17 +1502,19 @@ bot.on('text', async (ctx) => {
       const now = new Date();
       const pemasukan = parsed.type === 'pemasukan' ? parsed.amountText : '';
       const pengeluaran = parsed.type === 'pengeluaran' ? parsed.amountText : '';
+      const toko = parsed.toko || '';
 
       await appendRow([
         now.toLocaleDateString('id-ID', { timeZone: getTimezone() }),
         parsed.category,
-        '',
+        toko,
         pemasukan,
         pengeluaran,
       ]);
 
+      const tokoLabel = toko ? ` | toko: ${toko}` : '';
       successLines.push(
-        `${parsed.type} | ${parsed.category} | ${parsed.amountText}`
+        `${parsed.type} | ${parsed.category}${tokoLabel} | ${parsed.amountText}`
       );
     }
 
