@@ -188,7 +188,24 @@ function getAllowedUserIds() {
       if (t) ids.push(t);
     }
   }
-  return ids.filter(Boolean);
+
+  // Id dari pemetaan nama user (config.users) juga otomatis diizinkan.
+  if (config.users && typeof config.users === 'object') {
+    for (const id of Object.keys(config.users)) ids.push(String(id).trim());
+  }
+
+  return Array.from(new Set(ids.filter(Boolean)));
+}
+
+function getUserName(ctx) {
+  const id = String(ctx.from?.id || '').trim();
+  const users = config.users || {};
+  if (users[id]) return String(users[id]);
+
+  const fn = ctx.from?.first_name || '';
+  const ln = ctx.from?.last_name || '';
+  const name = `${fn} ${ln}`.trim();
+  return name || ctx.from?.username || id || 'User';
 }
 
 function isOwner(ctx) {
@@ -243,7 +260,7 @@ async function getAllEntries() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:F`,
+    range: `'${sheetName}'!A:G`,
   });
 
   const rows = res.data.values || [];
@@ -258,6 +275,7 @@ async function getAllEntries() {
     const pemasukan = row[3] || '';
     const pengeluaran = row[4] || '';
     const catatan = row[5] || '';
+    const pencatat = row[6] || '';
 
     const parsedDate = parseDateParts(tanggal);
     if (!parsedDate) continue;
@@ -269,6 +287,7 @@ async function getAllEntries() {
       pemasukan: parseRupiahTextToNumber(pemasukan),
       pengeluaran: parseRupiahTextToNumber(pengeluaran),
       catatan,
+      pencatat,
       parsedDate,
     });
   }
@@ -330,7 +349,7 @@ async function appendRow(values) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:F`,
+    range: `'${sheetName}'!A:G`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [values],
@@ -347,7 +366,7 @@ async function ensureHeader() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A1:F2`,
+    range: `'${sheetName}'!A1:G2`,
   });
 
   const values = res.data.values || [];
@@ -358,12 +377,13 @@ async function ensureHeader() {
     header[0] !== 'Tanggal' ||
     header[2] !== 'Toko' ||
     header[4] !== 'Pengeluaran' ||
-    header[5] !== 'Catatan';
+    header[5] !== 'Catatan' ||
+    header[6] !== 'Pencatat';
 
   if (needsHeader) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: config.spreadsheetId,
-      range: `'${sheetName}'!A1:F1`,
+      range: `'${sheetName}'!A1:G1`,
       valueInputOption: 'RAW',
       requestBody: {
         values: [[
@@ -372,7 +392,8 @@ async function ensureHeader() {
           'Toko',
           'Pemasukan',
           'Pengeluaran',
-          'Catatan'
+          'Catatan',
+          'Pencatat'
         ]]
       }
     });
@@ -400,7 +421,7 @@ async function formatSheetLayout() {
 
   const valueRes = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:F`,
+    range: `'${sheetName}'!A:G`,
   });
 
   const values = valueRes.data.values || [];
@@ -428,7 +449,7 @@ async function formatSheetLayout() {
               startRowIndex: 0,
               endRowIndex: 1,
               startColumnIndex: 0,
-              endColumnIndex: 6
+              endColumnIndex: 7
             },
             cell: {
               userEnteredFormat: {
@@ -518,7 +539,7 @@ async function formatSheetLayout() {
               startRowIndex: 1,
               endRowIndex: lastRow,
               startColumnIndex: 5,
-              endColumnIndex: 6
+              endColumnIndex: 7
             },
             cell: {
               userEnteredFormat: {
@@ -540,7 +561,7 @@ async function formatSheetLayout() {
                 startRowIndex: 0,
                 endRowIndex: lastRow,
                 startColumnIndex: 0,
-                endColumnIndex: 6
+                endColumnIndex: 7
               }
             }
           }
@@ -602,13 +623,27 @@ async function formatSheetLayout() {
           }
         },
         {
+          updateDimensionProperties: {
+            range: {
+              sheetId,
+              dimension: 'COLUMNS',
+              startIndex: 6,
+              endIndex: 7
+            },
+            properties: {
+              pixelSize: 110
+            },
+            fields: 'pixelSize'
+          }
+        },
+        {
           updateBorders: {
             range: {
               sheetId,
               startRowIndex: 0,
               endRowIndex: lastRow,
               startColumnIndex: 0,
-              endColumnIndex: 6
+              endColumnIndex: 7
             },
             top: {
               style: 'SOLID',
@@ -702,6 +737,8 @@ async function updateAnalisaSheet() {
   const perToko = {};
   const perBulan = {};
 
+  const perPencatat = {};
+
   for (const entry of entries) {
     totalPemasukan += entry.pemasukan;
     totalPengeluaran += entry.pengeluaran;
@@ -713,6 +750,9 @@ async function updateAnalisaSheet() {
 
       const toko = entry.toko || '(Tanpa Toko)';
       perToko[toko] = (perToko[toko] || 0) + entry.pengeluaran;
+
+      const pencatat = entry.pencatat || '(Tanpa Nama)';
+      perPencatat[pencatat] = (perPencatat[pencatat] || 0) + entry.pengeluaran;
     }
 
     const key = `${entry.parsedDate.year}-${String(entry.parsedDate.month).padStart(2, '0')}`;
@@ -736,6 +776,7 @@ async function updateAnalisaSheet() {
 
   const katSorted = sortByValueDesc(perKategori);
   const tokoSorted = sortByValueDesc(perToko);
+  const pencatatSorted = sortByValueDesc(perPencatat);
   const bulanSorted = Object.values(perBulan).sort((a, b) => {
     if (a.year !== b.year) return a.year - b.year;
     return a.month - b.month;
@@ -778,6 +819,15 @@ async function updateAnalisaSheet() {
     rows.push([toko, jumlah, pctOf(jumlah)]);
   }
   const tokoDataEnd = at();
+  rows.push(['']);
+
+  boldRows.push(at()); rows.push(['PENGELUARAN PER PENCATAT']);
+  boldRows.push(at()); rows.push(['Pencatat', 'Jumlah', 'Persentase']);
+  const pencatatDataStart = at();
+  for (const [nama, jumlah] of pencatatSorted) {
+    rows.push([nama, jumlah, pctOf(jumlah)]);
+  }
+  const pencatatDataEnd = at();
   rows.push(['']);
 
   boldRows.push(at()); rows.push(['RINGKASAN PER BULAN']);
@@ -916,6 +966,23 @@ async function updateAnalisaSheet() {
     });
   }
 
+  if (pencatatDataEnd > pencatatDataStart) {
+    requests.push({
+      repeatCell: {
+        range: rangeCell(pencatatDataStart, pencatatDataEnd, 1, 2),
+        cell: currencyFmt,
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    });
+    requests.push({
+      repeatCell: {
+        range: rangeCell(pencatatDataStart, pencatatDataEnd, 2, 3),
+        cell: percentFmt,
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    });
+  }
+
   // Format tabel bulan (Pemasukan, Pengeluaran, Saldo)
   if (bulanDataEnd > bulanDataStart) {
     requests.push({
@@ -1000,9 +1067,22 @@ async function updateAnalisaSheet() {
     }));
   }
 
+  // Pie: Pengeluaran per Pencatat (siapa yang catat/belanja)
+  if (pencatatDataEnd > pencatatDataStart) {
+    requests.push(anchorChart(49, {
+      title: 'Pengeluaran per Pencatat',
+      pieChart: {
+        legendPosition: 'RIGHT_LEGEND',
+        pieHole: 0.4,
+        domain: src(pencatatDataStart, pencatatDataEnd, 0, 1),
+        series: src(pencatatDataStart, pencatatDataEnd, 1, 2)
+      }
+    }));
+  }
+
   // Bar: Pemasukan & Pengeluaran per Bulan
   if (bulanDataEnd > bulanDataStart) {
-    requests.push(anchorChart(49, {
+    requests.push(anchorChart(65, {
       title: 'Pemasukan & Pengeluaran per Bulan',
       basicChart: {
         chartType: 'COLUMN',
@@ -1034,6 +1114,7 @@ async function updateAnalisaSheet() {
     jumlahTransaksi: entries.length,
     perKategori: katSorted,
     perToko: tokoSorted,
+    perPencatat: pencatatSorted,
   };
 }
 
@@ -1541,7 +1622,8 @@ async function runDueLangganan(day, month, year) {
       l.toko || 'Lainnya',
       '',
       pengeluaran,
-      tag
+      tag,
+      'Langganan'
     ]);
     posted.push(l);
   }
@@ -1561,7 +1643,7 @@ async function deleteLastTransaction() {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:F`
+    range: `'${sheetName}'!A:G`
   });
   const rows = res.data.values || [];
   if (rows.length <= 1) return null;
@@ -2246,6 +2328,14 @@ bot.command('analisa', async (ctx) => {
       }
     }
 
+    if (analisa.perPencatat && analisa.perPencatat.length > 1) {
+      lines.push('');
+      lines.push('Pengeluaran per Pencatat:');
+      for (const [nama, jumlah] of analisa.perPencatat) {
+        lines.push(`- ${nama}: ${formatRupiah(jumlah)}`);
+      }
+    }
+
     lines.push('');
     lines.push(`Detail lengkap ada di sheet "${getAnalisaSheetName()}".`);
 
@@ -2583,7 +2673,8 @@ bot.on(['photo', 'document'], async (ctx) => {
       kategori: normalizeCategory(parsed.kategori || '', 'pengeluaran'),
       toko: (parsed.toko || '').trim(),
       total: Math.round(total),
-      items: Array.isArray(parsed.items) ? parsed.items : []
+      items: Array.isArray(parsed.items) ? parsed.items : [],
+      pencatat: getUserName(ctx)
     };
 
     const id = Math.random().toString(36).slice(2, 8);
@@ -2600,7 +2691,7 @@ bot.on(['photo', 'document'], async (ctx) => {
   }
 });
 
-async function processTransactionText(text) {
+async function processTransactionText(ctx, text) {
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -2615,6 +2706,7 @@ async function processTransactionText(text) {
   const todayStr = now.toLocaleDateString('id-ID', { timeZone: tz });
   const curMonth = Number(now.toLocaleDateString('en-US', { timeZone: tz, month: 'numeric' }));
   const curYear = Number(now.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric' }));
+  const pencatat = getUserName(ctx);
 
   const successLines = [];
   const failedLines = [];
@@ -2637,7 +2729,8 @@ async function processTransactionText(text) {
       toko,
       pemasukan,
       pengeluaran,
-      parsed.catatan || ''
+      parsed.catatan || '',
+      pencatat
     ]);
 
     if (parsed.type === 'pengeluaran') expenseCats.add(parsed.category);
@@ -2772,7 +2865,7 @@ bot.on('text', async (ctx) => {
 
     if (await handleKeywordText(ctx, text)) return;
 
-    const reply = await processTransactionText(text);
+    const reply = await processTransactionText(ctx, text);
     return ctx.reply(reply);
   } catch (err) {
     logError('Gagal memproses pesan.', err);
@@ -2814,7 +2907,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
     if (await handleKeywordText(ctx, transcript)) return;
 
-    const reply = await processTransactionText(transcript);
+    const reply = await processTransactionText(ctx, transcript);
     return ctx.reply(reply);
   } catch (err) {
     logError('Gagal memproses suara.', err);
@@ -2877,7 +2970,8 @@ bot.on('callback_query', async (ctx) => {
         pending.toko || 'Lainnya',
         '',
         pengeluaran,
-        'Struk'
+        'Struk',
+        pending.pencatat || getUserName(ctx)
       ]);
       await formatSheetLayout();
       try { await updateAnalisaSheet(); } catch (e) { logError('Gagal update analisa.', e); }

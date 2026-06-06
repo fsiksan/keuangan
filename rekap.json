@@ -2,6 +2,7 @@
   "botToken": "telegramtoken",
   "ownerUserId": "chatid",
   "allowedUserIds": "",
+  "users": {},
   "spreadsheetId": "idsheet",
   "sheetName": "Sheet1",
   "analisaSheetName": "Analisa",

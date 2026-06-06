@@ -177,15 +177,33 @@ sesuai jadwal (`reminderHour` / `langgananHour` di rekap.json).
 * **Pesan suara** → ditranskripsi (butuh `openaiApiKey` + `sttModel`, mis.
   `whisper-1`) lalu diproses seperti teks ("keluar makan 50rb di warteg").
 
-## Multi-user (keluarga)
+## Multi-user (suami–istri / keluarga)
 
-Isi `allowedUserIds` (dipisah koma) untuk mengizinkan beberapa user memakai bot
-yang sama. Reminder & langganan otomatis dikirim ke semua user tersebut.
+Beberapa user Telegram bisa memakai bot yang sama dan menulis ke **satu Google
+Sheet yang sama**. Untuk rumah tangga, **disarankan satu sheet gabungan** supaya
+budget, saldo, dan analisa menjadi satu "keuangan keluarga". Setiap transaksi
+otomatis menyimpan **kolom Pencatat** sehingga tetap terlihat siapa yang mencatat,
+dan ada rincian "Pengeluaran per Pencatat" di sheet Analisa + `/analisa`.
+
+Cara mengatur (pakai `users` agar nama tampil rapi):
+```json
+"users": {
+  "111111111": "Suami",
+  "222222222": "Istri"
+}
+```
+Id pada `users` otomatis diizinkan. Alternatif: isi `allowedUserIds` (dipisah
+koma) bila tak ingin memetakan nama (nama diambil dari profil Telegram).
+Reminder & langganan otomatis dikirim ke semua user tersebut.
+
+> Mau benar-benar terpisah? Bisa jalankan **2 instance bot** dengan
+> `spreadsheetId` berbeda. Tapi untuk pasangan, satu sheet gabungan + kolom
+> Pencatat jauh lebih praktis (budget & saldo menyatu).
 
 ## Kolom Spreadsheet
 
-| Tanggal | Kategori | Toko | Pemasukan | Pengeluaran | Catatan |
-|---------|----------|------|-----------|-------------|---------|
+| Tanggal | Kategori | Toko | Pemasukan | Pengeluaran | Catatan | Pencatat |
+|---------|----------|------|-----------|-------------|---------|----------|
 
 Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Analisa**.
 
