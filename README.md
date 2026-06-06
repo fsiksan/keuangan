@@ -161,6 +161,24 @@ tanggal, kategori, dan total, lalu menyimpannya sebagai pengeluaran.
 | Tanggal | Kategori | Toko | Pemasukan | Pengeluaran |
 |---------|----------|------|-----------|-------------|
 
-Sheet **Analisa** dibuat otomatis dan berisi ringkasan total pemasukan,
-pengeluaran, saldo, pengeluaran per kategori, per toko, dan ringkasan per bulan.
+## Sheet Analisa (otomatis + grafik)
+
+Sheet **Analisa** dibuat & diperbarui otomatis setiap ada transaksi, berisi:
+* Ringkasan: total pemasukan, pengeluaran, saldo, jumlah transaksi, rata-rata pengeluaran
+* Tabel pengeluaran per kategori & per toko (dengan persentase)
+* Ringkasan per bulan (pemasukan, pengeluaran, saldo)
+* **Grafik**: pie Pemasukan vs Pengeluaran, pie per Kategori, pie per Toko,
+  dan bar Pemasukan & Pengeluaran per Bulan
+
+## Induk Kategori (anti kategori ganda)
+
+Sinonim otomatis digabung jadi satu induk kategori, jadi "makan", "makanan",
+dan "warung" semuanya tercatat sebagai **Makanan**. Induk kategori pengeluaran:
+
+`Makanan` · `Minuman` · `Kebutuhan Pokok` · `Transportasi` · `Kesehatan` ·
+`Hiburan` · `Tagihan` · `Pendidikan` · `Belanja` · `Lainnya`
+
+Induk kategori pemasukan: `Gaji` · `Bonus` · `Usaha` · `Investasi` · `Freelance`.
+
+Kategori yang tidak dikenal tetap disimpan apa adanya (huruf dirapikan).
 ---

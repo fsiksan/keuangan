@@ -44,6 +44,55 @@ function getAnalisaSheetName() {
   return config.analisaSheetName || 'Analisa';
 }
 
+// Aturan induk kategori untuk pengeluaran (urutan = prioritas)
+const EXPENSE_CATEGORY_RULES = [
+  ['Makanan', ['makan', 'makanan', 'food', 'jajan', 'snack', 'cemilan', 'camilan', 'restoran', 'resto', 'warung', 'warteg', 'nasi', 'bakso', 'mie', 'ayam', 'sate', 'gofood', 'grabfood', 'sarapan', 'lunch', 'dinner']],
+  ['Minuman', ['minum', 'minuman', 'drink', 'kopi', 'coffee', 'teh', 'jus', 'boba', 'soda', 'aqua', 'air mineral', 'starbucks']],
+  ['Kebutuhan Pokok', ['kebutuhan pokok', 'kebutuhan', 'sembako', 'belanja', 'groceries', 'grocery', 'indomaret', 'alfamart', 'supermarket', 'minimarket', 'pasar', 'beras', 'gula', 'minyak goreng', 'telur', 'sabun', 'deterjen']],
+  ['Transportasi', ['transport', 'transportasi', 'kereta', 'krl', 'kai', 'tiket', 'pesawat', 'bus', 'travel', 'bensin', 'pertalite', 'pertamax', 'solar', 'bbm', 'ojek', 'ojol', 'gojek', 'grab', 'taksi', 'taxi', 'parkir', 'tol', 'angkot']],
+  ['Kesehatan', ['kesehatan', 'obat', 'apotek', 'apotik', 'dokter', 'klinik', 'rumah sakit', 'vitamin', 'medis']],
+  ['Hiburan', ['hiburan', 'bioskop', 'nonton', 'film', 'game', 'netflix', 'spotify', 'streaming', 'wisata', 'liburan', 'rekreasi', 'konser']],
+  ['Tagihan', ['tagihan', 'listrik', 'pln', 'air', 'pdam', 'internet', 'wifi', 'indihome', 'pulsa', 'paket data', 'kuota', 'token']],
+  ['Pendidikan', ['pendidikan', 'sekolah', 'kuliah', 'spp', 'buku', 'kursus', 'les']],
+  ['Belanja', ['baju', 'pakaian', 'sepatu', 'fashion', 'elektronik', 'gadget', 'shopee', 'tokopedia', 'lazada', 'olshop', 'online shop']],
+];
+
+// Aturan induk kategori untuk pemasukan
+const INCOME_CATEGORY_RULES = [
+  ['Gaji', ['gaji', 'salary', 'upah']],
+  ['Bonus', ['bonus', 'thr', 'komisi', 'insentif']],
+  ['Usaha', ['usaha', 'jualan', 'dagang', 'omzet', 'penjualan']],
+  ['Investasi', ['investasi', 'dividen', 'bunga', 'saham', 'crypto', 'airdrop', 'staking', 'trading']],
+  ['Freelance', ['freelance', 'proyek', 'project', 'fee', 'honor']],
+];
+
+function titleCase(str) {
+  return String(str)
+    .trim()
+    .split(/\s+/)
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ''))
+    .join(' ');
+}
+
+// Satukan sinonim kategori menjadi satu induk kategori.
+// Contoh: "makan", "makanan", "warung" -> "Makanan".
+function normalizeCategory(raw, type) {
+  const s = String(raw || '').toLowerCase().trim();
+  if (!s) return 'Lainnya';
+
+  const rules = type === 'pemasukan' ? INCOME_CATEGORY_RULES : EXPENSE_CATEGORY_RULES;
+
+  for (const [canonical, keywords] of rules) {
+    for (const kw of keywords) {
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`\\b${escaped}\\b`, 'i');
+      if (re.test(s)) return canonical;
+    }
+  }
+
+  return titleCase(raw);
+}
+
 function getTimezone() {
   return config.timezone || 'Asia/Jakarta';
 }
@@ -517,6 +566,7 @@ async function updateAnalisaSheet() {
 
   let totalPemasukan = 0;
   let totalPengeluaran = 0;
+  let expenseCount = 0;
   const perKategori = {};
   const perToko = {};
   const perBulan = {};
@@ -526,7 +576,8 @@ async function updateAnalisaSheet() {
     totalPengeluaran += entry.pengeluaran;
 
     if (entry.pengeluaran > 0) {
-      const kategori = entry.kategori || '(Tanpa Kategori)';
+      expenseCount += 1;
+      const kategori = normalizeCategory(entry.kategori, 'pengeluaran');
       perKategori[kategori] = (perKategori[kategori] || 0) + entry.pengeluaran;
 
       const toko = entry.toko || '(Tanpa Toko)';
@@ -547,150 +598,308 @@ async function updateAnalisaSheet() {
   }
 
   const saldo = totalPemasukan - totalPengeluaran;
+  const avgExpense = expenseCount > 0 ? Math.round(totalPengeluaran / expenseCount) : 0;
 
   const sortByValueDesc = (obj) =>
     Object.entries(obj).sort((a, b) => b[1] - a[1]);
 
-  const now = new Date();
-  const generatedAt = now.toLocaleString('id-ID', { timeZone: getTimezone() });
-
-  const rows = [];
-  rows.push(['ANALISA KEUANGAN', '', '', '']);
-  rows.push([`Diperbarui: ${generatedAt}`, '', '', '']);
-  rows.push(['', '', '', '']);
-
-  rows.push(['RINGKASAN', '', '', '']);
-  rows.push(['Total Pemasukan', formatRupiah(totalPemasukan), '', '']);
-  rows.push(['Total Pengeluaran', formatRupiah(totalPengeluaran), '', '']);
-  rows.push(['Saldo', formatRupiah(saldo), '', '']);
-  rows.push(['Jumlah Transaksi', String(entries.length), '', '']);
-  rows.push(['', '', '', '']);
-
-  rows.push(['PENGELUARAN PER KATEGORI', '', '', '']);
-  rows.push(['Kategori', 'Jumlah', 'Persentase', '']);
   const katSorted = sortByValueDesc(perKategori);
-  if (katSorted.length === 0) {
-    rows.push(['-', '', '', '']);
-  } else {
-    for (const [kategori, jumlah] of katSorted) {
-      const persen = totalPengeluaran > 0
-        ? ((jumlah / totalPengeluaran) * 100).toFixed(1) + '%'
-        : '0%';
-      rows.push([kategori, formatRupiah(jumlah), persen, '']);
-    }
-  }
-  rows.push(['', '', '', '']);
-
-  rows.push(['PENGELUARAN PER TOKO', '', '', '']);
-  rows.push(['Toko', 'Jumlah', 'Persentase', '']);
   const tokoSorted = sortByValueDesc(perToko);
-  if (tokoSorted.length === 0) {
-    rows.push(['-', '', '', '']);
-  } else {
-    for (const [toko, jumlah] of tokoSorted) {
-      const persen = totalPengeluaran > 0
-        ? ((jumlah / totalPengeluaran) * 100).toFixed(1) + '%'
-        : '0%';
-      rows.push([toko, formatRupiah(jumlah), persen, '']);
-    }
-  }
-  rows.push(['', '', '', '']);
-
-  rows.push(['RINGKASAN PER BULAN', '', '', '']);
-  rows.push(['Bulan', 'Pemasukan', 'Pengeluaran', 'Saldo']);
   const bulanSorted = Object.values(perBulan).sort((a, b) => {
     if (a.year !== b.year) return a.year - b.year;
     return a.month - b.month;
   });
-  if (bulanSorted.length === 0) {
-    rows.push(['-', '', '', '']);
-  } else {
-    for (const b of bulanSorted) {
-      rows.push([
-        buildMonthLabel(b.month, b.year),
-        formatRupiah(b.pemasukan),
-        formatRupiah(b.pengeluaran),
-        formatRupiah(b.pemasukan - b.pengeluaran)
-      ]);
-    }
+
+  const now = new Date();
+  const generatedAt = now.toLocaleString('id-ID', { timeZone: getTimezone() });
+  const pctOf = (v) => (totalPengeluaran > 0 ? v / totalPengeluaran : 0);
+
+  // Bangun baris sambil mencatat posisi (index 0-based) untuk acuan grafik.
+  const rows = [];
+  const boldRows = [];
+  const at = () => rows.length; // index baris berikutnya
+
+  rows.push(['ANALISA KEUANGAN']);
+  rows.push([`Diperbarui: ${generatedAt}`]);
+  rows.push(['']);
+
+  boldRows.push(at()); rows.push(['RINGKASAN']);
+  const sumIncomeRow = at(); rows.push(['Total Pemasukan', totalPemasukan]);
+  const sumExpenseRow = at(); rows.push(['Total Pengeluaran', totalPengeluaran]);
+  const sumSaldoRow = at(); rows.push(['Saldo', saldo]);
+  const sumCountRow = at(); rows.push(['Jumlah Transaksi', entries.length]);
+  const sumAvgRow = at(); rows.push(['Rata-rata Pengeluaran', avgExpense]);
+  rows.push(['']);
+
+  boldRows.push(at()); rows.push(['PENGELUARAN PER KATEGORI']);
+  boldRows.push(at()); rows.push(['Kategori', 'Jumlah', 'Persentase']);
+  const katDataStart = at();
+  for (const [kategori, jumlah] of katSorted) {
+    rows.push([kategori, jumlah, pctOf(jumlah)]);
+  }
+  const katDataEnd = at();
+  rows.push(['']);
+
+  boldRows.push(at()); rows.push(['PENGELUARAN PER TOKO']);
+  boldRows.push(at()); rows.push(['Toko', 'Jumlah', 'Persentase']);
+  const tokoDataStart = at();
+  for (const [toko, jumlah] of tokoSorted) {
+    rows.push([toko, jumlah, pctOf(jumlah)]);
+  }
+  const tokoDataEnd = at();
+  rows.push(['']);
+
+  boldRows.push(at()); rows.push(['RINGKASAN PER BULAN']);
+  const bulanHeaderRow = at(); rows.push(['Bulan', 'Pemasukan', 'Pengeluaran', 'Saldo']);
+  boldRows.push(bulanHeaderRow);
+  const bulanDataStart = at();
+  for (const b of bulanSorted) {
+    rows.push([
+      buildMonthLabel(b.month, b.year),
+      b.pemasukan,
+      b.pengeluaran,
+      b.pemasukan - b.pengeluaran
+    ]);
+  }
+  const bulanDataEnd = at();
+
+  // Ambil id grafik lama agar bisa dihapus (hindari grafik menumpuk).
+  let existingChartIds = [];
+  try {
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId: config.spreadsheetId,
+      fields: 'sheets(properties/sheetId,charts/chartId)'
+    });
+    const target = (meta.data.sheets || []).find(
+      (s) => s.properties.sheetId === sheetId
+    );
+    existingChartIds = ((target && target.charts) || []).map((c) => c.chartId);
+  } catch (e) {
+    logError('Gagal membaca grafik lama.', e);
   }
 
   await sheets.spreadsheets.values.clear({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:D`,
+    range: `'${sheetName}'!A1:Z1000`,
   });
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: config.spreadsheetId,
     range: `'${sheetName}'!A1`,
     valueInputOption: 'RAW',
-    requestBody: {
-      values: rows,
-    },
+    requestBody: { values: rows },
   });
+
+  const currencyFmt = {
+    userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '"Rp"#,##0' } }
+  };
+  const percentFmt = {
+    userEnteredFormat: { numberFormat: { type: 'PERCENT', pattern: '0.0%' } }
+  };
+
+  const rangeCell = (sr, er, sc, ec) => ({
+    sheetId,
+    startRowIndex: sr,
+    endRowIndex: er,
+    startColumnIndex: sc,
+    endColumnIndex: ec
+  });
+  const src = (sr, er, sc, ec) => ({
+    sourceRange: { sources: [rangeCell(sr, er, sc, ec)] }
+  });
+
+  const requests = [];
+
+  // Hapus grafik lama
+  for (const id of existingChartIds) {
+    requests.push({ deleteEmbeddedObject: { objectId: id } });
+  }
+
+  // Judul besar
+  requests.push({
+    repeatCell: {
+      range: rangeCell(0, 1, 0, 4),
+      cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 14 } } },
+      fields: 'userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.fontSize'
+    }
+  });
+
+  // Tebalkan baris header bagian/tabel
+  for (const r of boldRows) {
+    requests.push({
+      repeatCell: {
+        range: rangeCell(r, r + 1, 0, 4),
+        cell: { userEnteredFormat: { textFormat: { bold: true } } },
+        fields: 'userEnteredFormat.textFormat.bold'
+      }
+    });
+  }
+
+  // Format mata uang ringkasan
+  requests.push({
+    repeatCell: {
+      range: rangeCell(sumIncomeRow, sumSaldoRow + 1, 1, 2),
+      cell: currencyFmt,
+      fields: 'userEnteredFormat.numberFormat'
+    }
+  });
+  requests.push({
+    repeatCell: {
+      range: rangeCell(sumAvgRow, sumAvgRow + 1, 1, 2),
+      cell: currencyFmt,
+      fields: 'userEnteredFormat.numberFormat'
+    }
+  });
+
+  // Format tabel kategori & toko
+  if (katDataEnd > katDataStart) {
+    requests.push({
+      repeatCell: {
+        range: rangeCell(katDataStart, katDataEnd, 1, 2),
+        cell: currencyFmt,
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    });
+    requests.push({
+      repeatCell: {
+        range: rangeCell(katDataStart, katDataEnd, 2, 3),
+        cell: percentFmt,
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    });
+  }
+  if (tokoDataEnd > tokoDataStart) {
+    requests.push({
+      repeatCell: {
+        range: rangeCell(tokoDataStart, tokoDataEnd, 1, 2),
+        cell: currencyFmt,
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    });
+    requests.push({
+      repeatCell: {
+        range: rangeCell(tokoDataStart, tokoDataEnd, 2, 3),
+        cell: percentFmt,
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    });
+  }
+
+  // Format tabel bulan (Pemasukan, Pengeluaran, Saldo)
+  if (bulanDataEnd > bulanDataStart) {
+    requests.push({
+      repeatCell: {
+        range: rangeCell(bulanDataStart, bulanDataEnd, 1, 4),
+        cell: currencyFmt,
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    });
+  }
+
+  // Lebar kolom
+  requests.push({
+    updateDimensionProperties: {
+      range: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 },
+      properties: { pixelSize: 200 },
+      fields: 'pixelSize'
+    }
+  });
+  requests.push({
+    updateDimensionProperties: {
+      range: { sheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 5 },
+      properties: { pixelSize: 130 },
+      fields: 'pixelSize'
+    }
+  });
+
+  // Grafik
+  const anchorChart = (rowIndex, spec) => ({
+    addChart: {
+      chart: {
+        spec,
+        position: {
+          overlayPosition: {
+            anchorCell: { sheetId, rowIndex, columnIndex: 5 },
+            offsetXPixels: 10,
+            offsetYPixels: 5,
+            widthPixels: 460,
+            heightPixels: 300
+          }
+        }
+      }
+    }
+  });
+
+  // Pie: Pemasukan vs Pengeluaran
+  if (totalPemasukan > 0 || totalPengeluaran > 0) {
+    requests.push(anchorChart(1, {
+      title: 'Pemasukan vs Pengeluaran',
+      pieChart: {
+        legendPosition: 'RIGHT_LEGEND',
+        pieHole: 0.4,
+        domain: src(sumIncomeRow, sumExpenseRow + 1, 0, 1),
+        series: src(sumIncomeRow, sumExpenseRow + 1, 1, 2)
+      }
+    }));
+  }
+
+  // Pie: Pengeluaran per Kategori
+  if (katDataEnd > katDataStart) {
+    requests.push(anchorChart(17, {
+      title: 'Pengeluaran per Kategori',
+      pieChart: {
+        legendPosition: 'RIGHT_LEGEND',
+        pieHole: 0.4,
+        domain: src(katDataStart, katDataEnd, 0, 1),
+        series: src(katDataStart, katDataEnd, 1, 2)
+      }
+    }));
+  }
+
+  // Pie: Pengeluaran per Toko
+  if (tokoDataEnd > tokoDataStart) {
+    requests.push(anchorChart(33, {
+      title: 'Pengeluaran per Toko',
+      pieChart: {
+        legendPosition: 'RIGHT_LEGEND',
+        pieHole: 0.4,
+        domain: src(tokoDataStart, tokoDataEnd, 0, 1),
+        series: src(tokoDataStart, tokoDataEnd, 1, 2)
+      }
+    }));
+  }
+
+  // Bar: Pemasukan & Pengeluaran per Bulan
+  if (bulanDataEnd > bulanDataStart) {
+    requests.push(anchorChart(49, {
+      title: 'Pemasukan & Pengeluaran per Bulan',
+      basicChart: {
+        chartType: 'COLUMN',
+        legendPosition: 'BOTTOM_LEGEND',
+        headerCount: 1,
+        axis: [
+          { position: 'BOTTOM_AXIS', title: 'Bulan' },
+          { position: 'LEFT_AXIS', title: 'Rupiah' }
+        ],
+        domains: [{ domain: src(bulanHeaderRow, bulanDataEnd, 0, 1) }],
+        series: [
+          { series: src(bulanHeaderRow, bulanDataEnd, 1, 2), targetAxis: 'LEFT_AXIS' },
+          { series: src(bulanHeaderRow, bulanDataEnd, 2, 3), targetAxis: 'LEFT_AXIS' }
+        ]
+      }
+    }));
+  }
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId: config.spreadsheetId,
-    requestBody: {
-      requests: [
-        {
-          updateSheetProperties: {
-            properties: {
-              sheetId,
-              gridProperties: { frozenRowCount: 0 }
-            },
-            fields: 'gridProperties.frozenRowCount'
-          }
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 0,
-              endRowIndex: 1,
-              startColumnIndex: 0,
-              endColumnIndex: 4
-            },
-            cell: {
-              userEnteredFormat: {
-                textFormat: { bold: true, fontSize: 14 }
-              }
-            },
-            fields: 'userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.fontSize'
-          }
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: 'COLUMNS',
-              startIndex: 0,
-              endIndex: 1
-            },
-            properties: { pixelSize: 220 },
-            fields: 'pixelSize'
-          }
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: 'COLUMNS',
-              startIndex: 1,
-              endIndex: 4
-            },
-            properties: { pixelSize: 150 },
-            fields: 'pixelSize'
-          }
-        }
-      ]
-    }
+    requestBody: { requests },
   });
 
   return {
     totalPemasukan,
     totalPengeluaran,
     saldo,
+    avgExpense,
     jumlahTransaksi: entries.length,
     perKategori: katSorted,
     perToko: tokoSorted,
@@ -706,13 +915,16 @@ const RECEIPT_PROMPT =
   '- total: nominal AKHIR yang dibayar. Cari kata "Grand Total", "Total Belanja", ' +
   '"Total Bayar", atau "Total". Tulis sebagai angka Rupiah tanpa titik/koma/Rp.\n' +
   '- tanggal: tanggal transaksi pada struk, format DD/MM/YYYY. Kosongkan jika tidak ada.\n' +
-  '- kategori: tentukan dari jenis pembelian. Pilih SALAH SATU:\n' +
-  '   "Makanan" -> makanan/minuman/restoran/warung/kafe/snack,\n' +
+  '- kategori: tentukan dari jenis pembelian. Pilih SALAH SATU (gunakan kata persis ini):\n' +
+  '   "Makanan" -> makanan/restoran/warung/kafe/snack,\n' +
+  '   "Minuman" -> minuman/kopi/teh/jus/air mineral,\n' +
+  '   "Kebutuhan Pokok" -> minimarket/supermarket/sembako/Indomaret/Alfamart,\n' +
   '   "Transportasi" -> kereta/KAI/tiket/pesawat/bus/bensin/ojek/taksi/parkir/tol,\n' +
-  '   "Belanja" -> minimarket/supermarket/kebutuhan sehari-hari/Indomaret/Alfamart,\n' +
   '   "Kesehatan" -> apotek/obat/klinik/dokter/rumah sakit,\n' +
   '   "Hiburan" -> bioskop/game/streaming/wisata,\n' +
   '   "Tagihan" -> listrik/air/internet/pulsa/paket data,\n' +
+  '   "Pendidikan" -> sekolah/kuliah/buku/kursus,\n' +
+  '   "Belanja" -> pakaian/elektronik/gadget/online shop,\n' +
   '   "Lainnya" -> jika tidak cocok kategori di atas.\n' +
   '- items: daftar barang beserta harganya jika terbaca.\n' +
   '- is_receipt: true jika gambar adalah struk/nota/tiket pembayaran, selain itu false.\n' +
@@ -1070,7 +1282,7 @@ async function parseTransaction(text) {
 
     return {
       type,
-      category: category || 'Lainnya',
+      category: normalizeCategory(category, type),
       toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
       amountText
     };
@@ -1112,7 +1324,7 @@ async function parseTransaction(text) {
 
   return {
     type,
-    category,
+    category: normalizeCategory(category, type),
     toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
     amountText
   };
@@ -1380,6 +1592,7 @@ bot.command('analisa', async (ctx) => {
     lines.push(`Total Pengeluaran: ${formatRupiah(analisa.totalPengeluaran)}`);
     lines.push(`Saldo: ${formatRupiah(analisa.saldo)}`);
     lines.push(`Jumlah Transaksi: ${analisa.jumlahTransaksi}`);
+    lines.push(`Rata-rata Pengeluaran: ${formatRupiah(analisa.avgExpense)}`);
 
     if (analisa.perKategori.length > 0) {
       lines.push('');
@@ -1475,7 +1688,7 @@ bot.on(['photo', 'document'], async (ctx) => {
       tanggal = new Date().toLocaleDateString('id-ID', { timeZone: getTimezone() });
     }
 
-    const kategori = (parsed.kategori || 'Belanja').trim() || 'Belanja';
+    const kategori = normalizeCategory(parsed.kategori || '', 'pengeluaran');
     const toko = (parsed.toko || '').trim();
     const pengeluaran = 'Rp' + Math.round(total).toLocaleString('id-ID');
 
