@@ -137,14 +137,29 @@ node rekap.js
 | /start | Petunjuk pengisian & penggunaan + tombol pintasan |
 | /help | Bantuan lengkap |
 | /menu | Tampilkan tombol pintasan |
+| /saldo | Saldo total & ringkasan bulan ini |
 | /hari [DD MM YYYY] | Rekap harian |
+| /minggu | Rekap 7 hari terakhir |
 | /bulan [MM YYYY] | Rekap bulanan |
 | /laporan [MM YYYY] | Laporan + grafik + proyeksi + anomali (kirim gambar chart) |
 | /analisa | Analisa lengkap + grafik di Sheet |
 | /budget | Lihat budget per kategori & pemakaian bulan ini |
 | /target | Lihat target tabungan & progress |
 | /langganan | Kelola tagihan rutin (tambah/hapus/jalan) |
+| /cari <kata> | Cari transaksi (kategori/toko/catatan/pencatat) |
+| /export | Unduh seluruh data sebagai file CSV |
 | /hapus | Hapus transaksi terakhir |
+
+### Catat untuk tanggal lampau (backdate)
+
+Tambahkan `tgl <tanggal>` di mana saja pada pesan:
+* `keluar makan 50000 tgl 5` → tanggal 5 bulan ini
+* `keluar bensin 50rb tgl 3/6/2026`
+
+### Hapus budget / target
+
+* `budget hapus makanan`
+* `target hapus liburan`
 
 ## Transaction Examples
 

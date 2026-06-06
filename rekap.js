@@ -36,9 +36,10 @@ const pendingReceipts = new Map();
 
 // Keyboard pintasan yang muncul di bawah kolom ketik.
 const mainKeyboard = Markup.keyboard([
-  ['/hari', '/bulan', '/laporan'],
-  ['/analisa', '/budget', '/target'],
-  ['/langganan', '/hapus', '/help']
+  ['/saldo', '/hari', '/minggu', '/bulan'],
+  ['/laporan', '/analisa', '/budget', '/target'],
+  ['/langganan', '/cari', '/export', '/hapus'],
+  ['/help']
 ]).resize();
 
 const RECEIPT_CATEGORIES = [
@@ -1419,6 +1420,38 @@ async function setBudget(kategori, amount) {
   return canon;
 }
 
+async function deleteBudget(kategori) {
+  const sheetName = getBudgetSheetName();
+  const canon = normalizeCategory(kategori, 'pengeluaran');
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A2:B`
+  });
+  const rows = res.data.values || [];
+  let foundRow = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (normalizeCategory((rows[i][0] || '').trim(), 'pengeluaran') === canon) {
+      foundRow = i;
+      break;
+    }
+  }
+  if (foundRow < 0) return false;
+  const sheetId = await getSheetIdByName(sheetName);
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: config.spreadsheetId,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: { sheetId, dimension: 'ROWS', startIndex: foundRow + 1, endIndex: foundRow + 2 }
+        }
+      }]
+    }
+  });
+  return true;
+}
+
 async function getMonthlyCategoryTotal(kategoriCanon, month, year) {
   const entries = await getAllEntries();
   let sum = 0;
@@ -1511,6 +1544,27 @@ async function addNabung(nama, amount) {
     requestBody: { values: [[found.nama, found.target, terkumpul]] }
   });
   return { ...found, terkumpul };
+}
+
+async function deleteTarget(nama) {
+  const sheetName = getTargetSheetName();
+  const list = await getTargets();
+  const found = list.find((t) => t.nama.toLowerCase() === nama.toLowerCase());
+  if (!found) return false;
+  const sheetId = await getSheetIdByName(sheetName);
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: config.spreadsheetId,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: { sheetId, dimension: 'ROWS', startIndex: found.rowNum - 1, endIndex: found.rowNum }
+        }
+      }]
+    }
+  });
+  return true;
 }
 
 // ----- Langganan / recurring -----
@@ -1918,6 +1972,31 @@ function extractLabeledField(text, key) {
   return m ? m[1].trim() : '';
 }
 
+function extractDateToken(text) {
+  // Mendukung "tgl 5", "tgl 5/6", "tanggal 5/6/2026"
+  const re = /\b(?:tgl|tanggal)\s+(\d{1,2})(?:[\/-](\d{1,2}))?(?:[\/-](\d{2,4}))?\b/i;
+  const m = text.match(re);
+  if (!m) return { dateStr: '', rest: text };
+
+  const tz = getTimezone();
+  const now = new Date();
+  const curMonth = Number(now.toLocaleDateString('en-US', { timeZone: tz, month: 'numeric' }));
+  const curYear = Number(now.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric' }));
+
+  const d = Number(m[1]);
+  const mo = m[2] ? Number(m[2]) : curMonth;
+  let y = m[3] ? Number(m[3]) : curYear;
+  if (y < 100) y += 2000;
+
+  if (d < 1 || d > 31 || mo < 1 || mo > 12) return { dateStr: '', rest: text };
+
+  const dateStr = `${d}/${mo}/${y}`;
+  const rest = (text.slice(0, m.index) + ' ' + text.slice(m.index + m[0].length))
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { dateStr, rest };
+}
+
 async function parseTransaction(text) {
   let raw = text.replace(/\s+/g, ' ').trim();
 
@@ -1928,6 +2007,11 @@ async function parseTransaction(text) {
     catatan = raw.slice(noteIdx + 1).trim();
     raw = raw.slice(0, noteIdx).trim();
   }
+
+  // Ekstrak tanggal opsional ("tgl 5", "tanggal 5/6/2026")
+  const dateInfo = extractDateToken(raw);
+  const tanggal = dateInfo.dateStr;
+  raw = dateInfo.rest;
 
   const typeMatch = raw.match(/^(masuk|keluar)\b\s*/i);
   if (!typeMatch) return null;
@@ -1959,6 +2043,7 @@ async function parseTransaction(text) {
       category: normalizeCategory(category, type),
       toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
       catatan,
+      tanggal,
       amountText
     };
   }
@@ -2002,6 +2087,7 @@ async function parseTransaction(text) {
     category: normalizeCategory(category, type),
     toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
     catatan,
+    tanggal,
     amountText
   };
 }
@@ -2082,17 +2168,25 @@ bot.command('help', async (ctx) => {
     'Catatan opsional pakai #:\n' +
     '- keluar makan 50000 di warteg #makan siang\n' +
     '\n' +
+    'Catat untuk tanggal lampau (backdate):\n' +
+    '- keluar makan 50000 tgl 5\n' +
+    '- keluar bensin 50rb tgl 3/6/2026\n' +
+    '\n' +
     'Input lain:\n' +
     '- Foto/upload struk → dibaca AI, konfirmasi via tombol\n' +
     '- Pesan suara → ditranskripsi lalu dicatat\n' +
     '\n' +
     'Budget & target:\n' +
     'budget <kategori> <nominal>   (mis: budget makanan 1jt)\n' +
+    'budget hapus <kategori>\n' +
     'target <nama> <nominal>       (mis: target liburan 5jt)\n' +
+    'target hapus <nama>\n' +
     'nabung <nama> <nominal>       (mis: nabung liburan 500k)\n' +
     '\n' +
     'Perintah:\n' +
+    '/saldo - saldo total & bulan ini\n' +
     '/hari [DD MM YYYY] - rekap harian\n' +
+    '/minggu - rekap 7 hari terakhir\n' +
     '/bulan [MM YYYY] - rekap bulanan\n' +
     '/laporan [MM YYYY] - laporan + grafik + proyeksi\n' +
     '/analisa - analisa lengkap + grafik di Sheet\n' +
@@ -2101,6 +2195,8 @@ bot.command('help', async (ctx) => {
     '/langganan - kelola tagihan rutin\n' +
     '   /langganan tambah Nama; Kategori; Nominal; Hari\n' +
     '   /langganan jalan | /langganan hapus <nama>\n' +
+    '/cari <kata> - cari transaksi\n' +
+    '/export - unduh data CSV\n' +
     '/hapus - hapus transaksi terakhir'
   );
 });
@@ -2602,6 +2698,178 @@ bot.command('laporan', async (ctx) => {
   }
 });
 
+bot.command('saldo', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    const entries = await getAllEntries();
+    const tz = getTimezone();
+    const now = new Date();
+    const month = Number(now.toLocaleDateString('en-US', { timeZone: tz, month: 'numeric' }));
+    const year = Number(now.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric' }));
+
+    let inc = 0;
+    let exp = 0;
+    let mInc = 0;
+    let mExp = 0;
+    for (const e of entries) {
+      inc += e.pemasukan;
+      exp += e.pengeluaran;
+      if (e.parsedDate.month === month && e.parsedDate.year === year) {
+        mInc += e.pemasukan;
+        mExp += e.pengeluaran;
+      }
+    }
+
+    const lines = ['Saldo 💵', ''];
+    lines.push(`Saldo total: ${formatRupiah(inc - exp)}`);
+    lines.push(`Total pemasukan: ${formatRupiah(inc)}`);
+    lines.push(`Total pengeluaran: ${formatRupiah(exp)}`);
+    lines.push('');
+    lines.push(`Bulan ${buildMonthLabel(month, year)}:`);
+    lines.push(`  Masuk: ${formatRupiah(mInc)}`);
+    lines.push(`  Keluar: ${formatRupiah(mExp)}`);
+    lines.push(`  Selisih: ${formatRupiah(mInc - mExp)}`);
+
+    return ctx.reply(lines.join('\n'));
+  } catch (err) {
+    logError('Gagal menampilkan saldo.', err);
+    return ctx.reply('Gagal menampilkan saldo.');
+  }
+});
+
+bot.command('minggu', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    const tz = getTimezone();
+    const now = new Date();
+    const day = Number(now.toLocaleDateString('en-US', { timeZone: tz, day: 'numeric' }));
+    const month = Number(now.toLocaleDateString('en-US', { timeZone: tz, month: 'numeric' }));
+    const year = Number(now.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric' }));
+    const todayNum = Date.UTC(year, month - 1, day);
+    const startNum = todayNum - 6 * 86400000;
+
+    const entries = await getAllEntries();
+    let inc = 0;
+    let exp = 0;
+    const perKat = {};
+    for (const e of entries) {
+      const eNum = Date.UTC(e.parsedDate.year, e.parsedDate.month - 1, e.parsedDate.day);
+      if (eNum < startNum || eNum > todayNum) continue;
+      inc += e.pemasukan;
+      exp += e.pengeluaran;
+      if (e.pengeluaran > 0) {
+        const k = normalizeCategory(e.kategori, 'pengeluaran');
+        perKat[k] = (perKat[k] || 0) + e.pengeluaran;
+      }
+    }
+
+    const lines = ['Rekap 7 Hari Terakhir 📅', ''];
+    lines.push(`Pemasukan: ${formatRupiah(inc)}`);
+    lines.push(`Pengeluaran: ${formatRupiah(exp)}`);
+    lines.push(`Selisih: ${formatRupiah(inc - exp)}`);
+
+    const top = Object.entries(perKat).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    if (top.length > 0) {
+      lines.push('');
+      lines.push('Pengeluaran per kategori:');
+      for (const [k, v] of top) lines.push(`- ${k}: ${formatRupiah(v)}`);
+    }
+
+    return ctx.reply(lines.join('\n'));
+  } catch (err) {
+    logError('Gagal membuat rekap mingguan.', err);
+    return ctx.reply('Gagal membuat rekap mingguan.');
+  }
+});
+
+bot.command('cari', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    const q = (ctx.message.text || '').replace(/^\/cari(@\S+)?\s*/i, '').trim().toLowerCase();
+    if (!q) {
+      return ctx.reply('Format: /cari <kata>\nContoh: /cari indomaret');
+    }
+
+    const entries = await getAllEntries();
+    const matches = entries.filter((e) =>
+      [e.kategori, e.toko, e.catatan, e.pencatat]
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    );
+
+    if (matches.length === 0) {
+      return ctx.reply(`Tidak ada transaksi yang cocok dengan "${q}".`);
+    }
+
+    let totalExp = 0;
+    let totalInc = 0;
+    for (const e of matches) {
+      totalExp += e.pengeluaran;
+      totalInc += e.pemasukan;
+    }
+
+    const last = matches.slice(-15);
+    const lines = [`Hasil pencarian "${q}" (${matches.length} transaksi):`, ''];
+    for (const e of last) {
+      const nilai = e.pengeluaran > 0
+        ? `-${formatRupiah(e.pengeluaran)}`
+        : `+${formatRupiah(e.pemasukan)}`;
+      const tokoLabel = e.toko ? ` | ${e.toko}` : '';
+      lines.push(`${e.tanggal} | ${e.kategori}${tokoLabel} | ${nilai}`);
+    }
+    if (matches.length > last.length) {
+      lines.push(`...(${matches.length - last.length} lainnya)`);
+    }
+    lines.push('');
+    if (totalExp > 0) lines.push(`Total pengeluaran: ${formatRupiah(totalExp)}`);
+    if (totalInc > 0) lines.push(`Total pemasukan: ${formatRupiah(totalInc)}`);
+
+    return ctx.reply(lines.join('\n'));
+  } catch (err) {
+    logError('Gagal mencari transaksi.', err);
+    return ctx.reply('Gagal mencari transaksi.');
+  }
+});
+
+bot.command('export', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    const client = await auth.getClient();
+    const sheets = google.sheets({ version: 'v4', auth: client });
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: config.spreadsheetId,
+      range: `'${getSheetName()}'!A:G`
+    });
+    const rows = res.data.values || [];
+    if (rows.length <= 1) {
+      return ctx.reply('Belum ada data untuk diekspor.');
+    }
+
+    const esc = (v) => {
+      const s = String(v == null ? '' : v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const csv = rows.map((r) => r.map(esc).join(',')).join('\n');
+    const buffer = Buffer.from('﻿' + csv, 'utf8');
+
+    const tz = getTimezone();
+    const stamp = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+
+    return ctx.replyWithDocument({
+      source: buffer,
+      filename: `rekap-keuangan-${stamp}.csv`
+    });
+  } catch (err) {
+    logError('Gagal ekspor data.', err);
+    return ctx.reply('Gagal ekspor data.');
+  }
+});
+
 bot.on(['photo', 'document'], async (ctx) => {
   try {
     if (!(await guardOwner(ctx))) return;
@@ -2722,9 +2990,10 @@ async function processTransactionText(ctx, text) {
     const pemasukan = parsed.type === 'pemasukan' ? parsed.amountText : '';
     const pengeluaran = parsed.type === 'pengeluaran' ? parsed.amountText : '';
     const toko = parsed.toko || '';
+    const tglRow = parsed.tanggal || todayStr;
 
     await appendRow([
-      todayStr,
+      tglRow,
       parsed.category,
       toko,
       pemasukan,
@@ -2788,12 +3057,18 @@ async function processTransactionText(ctx, text) {
 }
 
 async function handleKeywordText(ctx, text) {
-  // budget <kategori> <nominal>
+  // budget <kategori> <nominal>  |  budget hapus <kategori>
   if (/^budget\s+/i.test(text)) {
     const rest = text.replace(/^budget\s+/i, '').trim();
+    if (/^hapus\s+/i.test(rest)) {
+      const kat = rest.replace(/^hapus\s+/i, '').trim();
+      const ok = await deleteBudget(kat);
+      await ctx.reply(ok ? `Budget ${normalizeCategory(kat, 'pengeluaran')} dihapus.` : 'Budget kategori itu tidak ditemukan.');
+      return true;
+    }
     const m = rest.match(/^(.+?)\s+(\S+)$/);
     if (!m) {
-      await ctx.reply('Format: budget <kategori> <nominal>\nContoh: budget makanan 1jt');
+      await ctx.reply('Format: budget <kategori> <nominal>\nContoh: budget makanan 1jt\nHapus: budget hapus makanan');
       return true;
     }
     const amount = await parseAmountToNumber(m[2]);
@@ -2806,12 +3081,18 @@ async function handleKeywordText(ctx, text) {
     return true;
   }
 
-  // target <nama> <nominal>
+  // target <nama> <nominal>  |  target hapus <nama>
   if (/^target\s+/i.test(text)) {
     const rest = text.replace(/^target\s+/i, '').trim();
+    if (/^hapus\s+/i.test(rest)) {
+      const nama = rest.replace(/^hapus\s+/i, '').trim();
+      const ok = await deleteTarget(nama);
+      await ctx.reply(ok ? `Target "${nama}" dihapus.` : `Target "${nama}" tidak ditemukan.`);
+      return true;
+    }
     const m = rest.match(/^(.+?)\s+(\S+)$/);
     if (!m) {
-      await ctx.reply('Format: target <nama> <nominal>\nContoh: target liburan 5jt');
+      await ctx.reply('Format: target <nama> <nominal>\nContoh: target liburan 5jt\nHapus: target hapus liburan');
       return true;
     }
     const amount = await parseAmountToNumber(m[2]);
@@ -3089,13 +3370,17 @@ async function registerBotCommands() {
       { command: 'start', description: 'Mulai & petunjuk penggunaan' },
       { command: 'help', description: 'Panduan lengkap' },
       { command: 'menu', description: 'Tampilkan tombol pintasan' },
+      { command: 'saldo', description: 'Saldo total & bulan ini' },
       { command: 'hari', description: 'Rekap hari ini' },
+      { command: 'minggu', description: 'Rekap 7 hari terakhir' },
       { command: 'bulan', description: 'Rekap bulan ini' },
       { command: 'laporan', description: 'Laporan + grafik + proyeksi' },
       { command: 'analisa', description: 'Analisa lengkap + grafik' },
       { command: 'budget', description: 'Lihat budget & pemakaian' },
       { command: 'target', description: 'Lihat target tabungan' },
       { command: 'langganan', description: 'Kelola tagihan rutin' },
+      { command: 'cari', description: 'Cari transaksi' },
+      { command: 'export', description: 'Ekspor data ke CSV' },
       { command: 'hapus', description: 'Hapus transaksi terakhir' }
     ]);
     logInfo('Menu perintah Telegram terpasang.');
