@@ -143,6 +143,7 @@ node rekap.js
 | /bulan [MM YYYY] | Rekap bulanan |
 | /laporan [MM YYYY] | Laporan + grafik + proyeksi + anomali (kirim gambar chart) |
 | /analisa | Analisa lengkap + grafik di Sheet |
+| /kategori | Rincian item per kategori (bulan ini) |
 | /budget | Lihat budget per kategori & pemakaian bulan ini |
 | /target | Lihat target tabungan & progress |
 | /langganan | Kelola tagihan rutin (tambah/hapus/jalan) |
@@ -242,8 +243,12 @@ Reminder & langganan otomatis dikirim ke semua user tersebut.
 
 ## Kolom Spreadsheet
 
-| Tanggal | Kategori | Toko | Pemasukan | Pengeluaran | Catatan | Pencatat |
-|---------|----------|------|-----------|-------------|---------|----------|
+| Tanggal | Item | Kategori | Toko | Pemasukan | Pengeluaran | Catatan | Pencatat |
+|---------|------|----------|------|-----------|-------------|---------|----------|
+
+**Item** = nama/jenis spesifik (mis. `bensin`), **Kategori** = pengelompokan induk
+otomatis (mis. `Transportasi`). Rekap & analisa memakai data **Kategori**;
+gunakan `/kategori` untuk melihat rincian item di tiap kategori.
 
 Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Hutang**, **Analisa**.
 

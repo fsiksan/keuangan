@@ -37,9 +37,10 @@ const pendingReceipts = new Map();
 // Keyboard pintasan yang muncul di bawah kolom ketik.
 const mainKeyboard = Markup.keyboard([
   ['/saldo', '/hari', '/minggu', '/bulan'],
-  ['/laporan', '/analisa', '/budget', '/target'],
-  ['/langganan', '/hutang', '/cari', '/export'],
-  ['/edit', '/hapus', '/help']
+  ['/laporan', '/analisa', '/kategori'],
+  ['/budget', '/target', '/langganan', '/hutang'],
+  ['/cari', '/export', '/edit', '/hapus'],
+  ['/help']
 ]).resize();
 
 const RECEIPT_CATEGORIES = [
@@ -51,6 +52,7 @@ function buildReceiptSummary(p) {
   const lines = [];
   lines.push('Hasil baca struk 🧾');
   lines.push(`Tanggal: ${p.tanggal}`);
+  if (p.item) lines.push(`Item: ${p.item}`);
   lines.push(`Kategori: ${p.kategori}`);
   if (p.toko) lines.push(`Toko: ${p.toko}`);
   lines.push(`Total: Rp${Math.round(p.total).toLocaleString('id-ID')}`);
@@ -265,7 +267,7 @@ async function getAllEntries() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:G`,
+    range: `'${sheetName}'!A:H`,
   });
 
   const rows = res.data.values || [];
@@ -275,18 +277,20 @@ async function getAllEntries() {
 
   for (const row of dataRows) {
     const tanggal = row[0] || '';
-    const kategori = row[1] || '';
-    const toko = row[2] || '';
-    const pemasukan = row[3] || '';
-    const pengeluaran = row[4] || '';
-    const catatan = row[5] || '';
-    const pencatat = row[6] || '';
+    const item = row[1] || '';
+    const kategori = row[2] || '';
+    const toko = row[3] || '';
+    const pemasukan = row[4] || '';
+    const pengeluaran = row[5] || '';
+    const catatan = row[6] || '';
+    const pencatat = row[7] || '';
 
     const parsedDate = parseDateParts(tanggal);
     if (!parsedDate) continue;
 
     entries.push({
       tanggal,
+      item,
       kategori,
       toko,
       pemasukan: parseRupiahTextToNumber(pemasukan),
@@ -354,7 +358,7 @@ async function appendRow(values) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:G`,
+    range: `'${sheetName}'!A:H`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [values],
@@ -371,7 +375,7 @@ async function ensureHeader() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A1:G2`,
+    range: `'${sheetName}'!A1:H2`,
   });
 
   const values = res.data.values || [];
@@ -380,19 +384,21 @@ async function ensureHeader() {
   const needsHeader =
     values.length === 0 ||
     header[0] !== 'Tanggal' ||
-    header[2] !== 'Toko' ||
-    header[4] !== 'Pengeluaran' ||
-    header[5] !== 'Catatan' ||
-    header[6] !== 'Pencatat';
+    header[1] !== 'Item' ||
+    header[2] !== 'Kategori' ||
+    header[5] !== 'Pengeluaran' ||
+    header[6] !== 'Catatan' ||
+    header[7] !== 'Pencatat';
 
   if (needsHeader) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: config.spreadsheetId,
-      range: `'${sheetName}'!A1:G1`,
+      range: `'${sheetName}'!A1:H1`,
       valueInputOption: 'RAW',
       requestBody: {
         values: [[
           'Tanggal',
+          'Item',
           'Kategori',
           'Toko',
           'Pemasukan',
@@ -426,7 +432,7 @@ async function formatSheetLayout() {
 
   const valueRes = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:G`,
+    range: `'${sheetName}'!A:H`,
   });
 
   const values = valueRes.data.values || [];
@@ -454,7 +460,7 @@ async function formatSheetLayout() {
               startRowIndex: 0,
               endRowIndex: 1,
               startColumnIndex: 0,
-              endColumnIndex: 7
+              endColumnIndex: 8
             },
             cell: {
               userEnteredFormat: {
@@ -502,7 +508,7 @@ async function formatSheetLayout() {
               startRowIndex: 1,
               endRowIndex: lastRow,
               startColumnIndex: 1,
-              endColumnIndex: 3
+              endColumnIndex: 4
             },
             cell: {
               userEnteredFormat: {
@@ -522,8 +528,8 @@ async function formatSheetLayout() {
               sheetId,
               startRowIndex: 1,
               endRowIndex: lastRow,
-              startColumnIndex: 3,
-              endColumnIndex: 5
+              startColumnIndex: 4,
+              endColumnIndex: 6
             },
             cell: {
               userEnteredFormat: {
@@ -543,8 +549,8 @@ async function formatSheetLayout() {
               sheetId,
               startRowIndex: 1,
               endRowIndex: lastRow,
-              startColumnIndex: 5,
-              endColumnIndex: 7
+              startColumnIndex: 6,
+              endColumnIndex: 8
             },
             cell: {
               userEnteredFormat: {
@@ -566,7 +572,7 @@ async function formatSheetLayout() {
                 startRowIndex: 0,
                 endRowIndex: lastRow,
                 startColumnIndex: 0,
-                endColumnIndex: 7
+                endColumnIndex: 8
               }
             }
           }
@@ -591,7 +597,7 @@ async function formatSheetLayout() {
               sheetId,
               dimension: 'COLUMNS',
               startIndex: 1,
-              endIndex: 3
+              endIndex: 2
             },
             properties: {
               pixelSize: 150
@@ -604,8 +610,22 @@ async function formatSheetLayout() {
             range: {
               sheetId,
               dimension: 'COLUMNS',
-              startIndex: 3,
-              endIndex: 5
+              startIndex: 2,
+              endIndex: 4
+            },
+            properties: {
+              pixelSize: 140
+            },
+            fields: 'pixelSize'
+          }
+        },
+        {
+          updateDimensionProperties: {
+            range: {
+              sheetId,
+              dimension: 'COLUMNS',
+              startIndex: 4,
+              endIndex: 6
             },
             properties: {
               pixelSize: 130
@@ -618,8 +638,8 @@ async function formatSheetLayout() {
             range: {
               sheetId,
               dimension: 'COLUMNS',
-              startIndex: 5,
-              endIndex: 6
+              startIndex: 6,
+              endIndex: 7
             },
             properties: {
               pixelSize: 200
@@ -632,8 +652,8 @@ async function formatSheetLayout() {
             range: {
               sheetId,
               dimension: 'COLUMNS',
-              startIndex: 6,
-              endIndex: 7
+              startIndex: 7,
+              endIndex: 8
             },
             properties: {
               pixelSize: 110
@@ -648,7 +668,7 @@ async function formatSheetLayout() {
               startRowIndex: 0,
               endRowIndex: lastRow,
               startColumnIndex: 0,
-              endColumnIndex: 7
+              endColumnIndex: 8
             },
             top: {
               style: 'SOLID',
@@ -1132,6 +1152,7 @@ const RECEIPT_PROMPT =
   '- total: nominal AKHIR yang dibayar. Cari kata "Grand Total", "Total Belanja", ' +
   '"Total Bayar", atau "Total". Tulis sebagai angka Rupiah tanpa titik/koma/Rp.\n' +
   '- tanggal: tanggal transaksi pada struk, format DD/MM/YYYY. Kosongkan jika tidak ada.\n' +
+  '- item: nama/jenis singkat pembelian (mis. "Belanja harian", "Makan", "Bensin", "Tiket kereta").\n' +
   '- kategori: tentukan dari jenis pembelian. Pilih SALAH SATU (gunakan kata persis ini):\n' +
   '   "Makanan" -> makanan/restoran/warung/kafe/snack,\n' +
   '   "Minuman" -> minuman/kopi/teh/jus/air mineral,\n' +
@@ -1153,6 +1174,7 @@ const RECEIPT_SCHEMA = {
     is_receipt: { type: 'boolean' },
     toko: { type: 'string' },
     tanggal: { type: 'string' },
+    item: { type: 'string' },
     kategori: { type: 'string' },
     total: { type: 'number' },
     items: {
@@ -1168,7 +1190,7 @@ const RECEIPT_SCHEMA = {
       }
     }
   },
-  required: ['is_receipt', 'toko', 'tanggal', 'kategori', 'total', 'items'],
+  required: ['is_receipt', 'toko', 'tanggal', 'item', 'kategori', 'total', 'items'],
   additionalProperties: false
 };
 
@@ -1176,7 +1198,7 @@ const RECEIPT_JSON_HINT =
   '\n\nKembalikan HANYA JSON valid (tanpa teks lain, tanpa markdown) dengan ' +
   'bentuk persis:\n' +
   '{"is_receipt": boolean, "toko": string, "tanggal": string, ' +
-  '"kategori": string, "total": number, ' +
+  '"item": string, "kategori": string, "total": number, ' +
   '"items": [{"nama": string, "harga": number}]}';
 
 function getLlmProvider() {
@@ -1676,6 +1698,7 @@ async function runDueLangganan(day, month, year) {
     const pengeluaran = 'Rp' + Math.round(l.nominal).toLocaleString('id-ID');
     await appendRow([
       tanggal,
+      l.nama,
       normalizeCategory(l.kategori, 'pengeluaran'),
       l.toko || 'Lainnya',
       '',
@@ -1701,7 +1724,7 @@ async function deleteLastTransaction() {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:G`
+    range: `'${sheetName}'!A:H`
   });
   const rows = res.data.values || [];
   if (rows.length <= 1) return null;
@@ -1720,11 +1743,12 @@ async function deleteLastTransaction() {
   });
   return {
     tanggal: last[0] || '',
-    kategori: last[1] || '',
-    toko: last[2] || '',
-    pemasukan: last[3] || '',
-    pengeluaran: last[4] || '',
-    catatan: last[5] || ''
+    item: last[1] || '',
+    kategori: last[2] || '',
+    toko: last[3] || '',
+    pemasukan: parseRupiahTextToNumber(last[4] || ''),
+    pengeluaran: parseRupiahTextToNumber(last[5] || ''),
+    catatan: last[6] || ''
   };
 }
 
@@ -1734,35 +1758,38 @@ async function editLastTransaction(field, rawValue) {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:G`
+    range: `'${sheetName}'!A:H`
   });
   const rows = res.data.values || [];
   if (rows.length <= 1) return null;
 
   const rowNum = rows.length; // baris terakhir (header di baris 1)
   const last = rows[rows.length - 1];
-  const isIncome = parseRupiahTextToNumber(last[3] || '') > 0;
+  const isIncome = parseRupiahTextToNumber(last[4] || '') > 0;
   const type = isIncome ? 'pemasukan' : 'pengeluaran';
 
   let col = null;
   let value = rawValue;
 
-  if (/^kategori$/i.test(field)) {
+  if (/^item$/i.test(field)) {
     col = 'B';
+    value = rawValue;
+  } else if (/^kategori$/i.test(field)) {
+    col = 'C';
     value = normalizeCategory(rawValue, type);
   } else if (/^toko$/i.test(field)) {
-    col = 'C';
+    col = 'D';
     value = rawValue;
   } else if (/^(nominal|jumlah|nilai)$/i.test(field)) {
     const amt = await parseMoneyText(rawValue);
     if (!amt) return { error: 'Nominal tidak valid.' };
-    col = isIncome ? 'D' : 'E';
+    col = isIncome ? 'E' : 'F';
     value = amt;
   } else if (/^(catatan|note)$/i.test(field)) {
-    col = 'F';
+    col = 'G';
     value = rawValue;
   } else {
-    return { error: 'Field tidak dikenal. Pilih: kategori / toko / nominal / catatan.' };
+    return { error: 'Field tidak dikenal. Pilih: item / kategori / toko / nominal / catatan.' };
   }
 
   await sheets.spreadsheets.values.update({
@@ -1772,12 +1799,7 @@ async function editLastTransaction(field, rawValue) {
     requestBody: { values: [[value]] }
   });
 
-  return {
-    field,
-    value,
-    tanggal: last[0] || '',
-    kategori: col === 'B' ? value : (last[1] || ''),
-  };
+  return { field, value };
 }
 
 // ----- Hutang / Piutang -----
@@ -2161,6 +2183,7 @@ async function parseTransaction(text) {
 
     return {
       type,
+      item: (category || '').trim(),
       category: normalizeCategory(category, type),
       toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
       catatan,
@@ -2205,6 +2228,7 @@ async function parseTransaction(text) {
 
   return {
     type,
+    item: category.trim(),
     category: normalizeCategory(category, type),
     toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
     catatan,
@@ -2266,18 +2290,19 @@ bot.command('help', async (ctx) => {
 
   return ctx.reply(
     'Cara catat transaksi:\n' +
-    'keluar <kategori> <nominal>\n' +
-    'keluar <kategori> <nominal> di <toko>\n' +
-    'masuk <kategori> <nominal>\n' +
+    'keluar <item> <nominal>\n' +
+    'keluar <item> <nominal> di <toko>\n' +
+    'masuk <item> <nominal>\n' +
     '\n' +
+    'Item = nama/jenis (mis. bensin). Bot otomatis mengelompokkan ke\n' +
+    'kategori induk (bensin -> Transportasi, makan -> Makanan).\n' +
     'Kalau toko tidak ditulis, otomatis jadi "Lainnya".\n' +
     '\n' +
     'Contoh:\n' +
-    '- keluar makan 100000\n' +
-    '   → kategori=makan, toko=Lainnya\n' +
+    '- keluar bensin 50000\n' +
+    '   → item=bensin, kategori=Transportasi\n' +
     '- keluar makan 100000 di warung agam\n' +
-    '   → kategori=makan, toko=warung agam\n' +
-    '- keluar bensin 50rb di SPBU Shell\n' +
+    '   → item=makan, kategori=Makanan, toko=warung agam\n' +
     '- keluar wifi 150000\n' +
     '- masuk gaji 5jt\n' +
     '- masuk airdrop 20 usdt\n' +
@@ -2316,6 +2341,7 @@ bot.command('help', async (ctx) => {
     '/bulan [MM YYYY] - rekap bulanan\n' +
     '/laporan [MM YYYY] - laporan + grafik + proyeksi\n' +
     '/analisa - analisa lengkap + grafik di Sheet\n' +
+    '/kategori - rincian item per kategori bulan ini\n' +
     '/budget - lihat budget & pemakaian\n' +
     '/target - lihat target tabungan\n' +
     '/langganan - kelola tagihan rutin\n' +
@@ -2324,7 +2350,7 @@ bot.command('help', async (ctx) => {
     '/hutang - catatan hutang & piutang\n' +
     '/cari <kata> - cari transaksi\n' +
     '/export - unduh data CSV\n' +
-    '/edit - edit transaksi terakhir\n' +
+    '/edit - edit transaksi terakhir (item/kategori/toko/nominal/catatan)\n' +
     '/hapus - hapus transaksi terakhir'
   );
 });
@@ -2730,6 +2756,56 @@ bot.command('budget', async (ctx) => {
   }
 });
 
+bot.command('kategori', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    const tz = getTimezone();
+    const now = new Date();
+    const month = Number(now.toLocaleDateString('en-US', { timeZone: tz, month: 'numeric' }));
+    const year = Number(now.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric' }));
+
+    const entries = await getAllEntries();
+    const monthEntries = entries.filter(
+      (e) => e.parsedDate.month === month && e.parsedDate.year === year && e.pengeluaran > 0
+    );
+
+    if (monthEntries.length === 0) {
+      return ctx.reply(`Belum ada pengeluaran di ${buildMonthLabel(month, year)}.`);
+    }
+
+    // kategori -> { total, items: {item: total} }
+    const groups = {};
+    let grand = 0;
+    for (const e of monthEntries) {
+      const kat = normalizeCategory(e.kategori, 'pengeluaran');
+      if (!groups[kat]) groups[kat] = { total: 0, items: {} };
+      groups[kat].total += e.pengeluaran;
+      const it = e.item || '(tanpa item)';
+      groups[kat].items[it] = (groups[kat].items[it] || 0) + e.pengeluaran;
+      grand += e.pengeluaran;
+    }
+
+    const lines = [`Pengeluaran per Kategori — ${buildMonthLabel(month, year)} 🗂️`, ''];
+    const katSorted = Object.entries(groups).sort((a, b) => b[1].total - a[1].total);
+    for (const [kat, data] of katSorted) {
+      const pct = grand > 0 ? Math.round((data.total / grand) * 100) : 0;
+      lines.push(`▸ ${kat}: ${formatRupiah(data.total)} (${pct}%)`);
+      const itemsSorted = Object.entries(data.items).sort((a, b) => b[1] - a[1]).slice(0, 8);
+      for (const [it, v] of itemsSorted) {
+        lines.push(`   • ${it}: ${formatRupiah(v)}`);
+      }
+    }
+    lines.push('');
+    lines.push(`Total: ${formatRupiah(grand)}`);
+
+    return ctx.reply(lines.join('\n'));
+  } catch (err) {
+    logError('Gagal menampilkan kategori.', err);
+    return ctx.reply('Gagal menampilkan rincian kategori.');
+  }
+});
+
 bot.command('target', async (ctx) => {
   try {
     if (!(await guardOwner(ctx))) return;
@@ -3025,7 +3101,7 @@ bot.command('cari', async (ctx) => {
 
     const entries = await getAllEntries();
     const matches = entries.filter((e) =>
-      [e.kategori, e.toko, e.catatan, e.pencatat]
+      [e.item, e.kategori, e.toko, e.catatan, e.pencatat]
         .join(' ')
         .toLowerCase()
         .includes(q)
@@ -3048,8 +3124,9 @@ bot.command('cari', async (ctx) => {
       const nilai = e.pengeluaran > 0
         ? `-${formatRupiah(e.pengeluaran)}`
         : `+${formatRupiah(e.pemasukan)}`;
+      const itemLabel = e.item ? `${e.item} | ` : '';
       const tokoLabel = e.toko ? ` | ${e.toko}` : '';
-      lines.push(`${e.tanggal} | ${e.kategori}${tokoLabel} | ${nilai}`);
+      lines.push(`${e.tanggal} | ${itemLabel}${e.kategori}${tokoLabel} | ${nilai}`);
     }
     if (matches.length > last.length) {
       lines.push(`...(${matches.length - last.length} lainnya)`);
@@ -3073,7 +3150,7 @@ bot.command('export', async (ctx) => {
     const sheets = google.sheets({ version: 'v4', auth: client });
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: config.spreadsheetId,
-      range: `'${getSheetName()}'!A:G`
+      range: `'${getSheetName()}'!A:H`
     });
     const rows = res.data.values || [];
     if (rows.length <= 1) {
@@ -3168,6 +3245,7 @@ bot.on(['photo', 'document'], async (ctx) => {
 
     const pending = {
       tanggal,
+      item: (parsed.item || '').trim() || (parsed.toko || '').trim() || 'Belanja',
       kategori: normalizeCategory(parsed.kategori || '', 'pengeluaran'),
       toko: (parsed.toko || '').trim(),
       total: Math.round(total),
@@ -3220,10 +3298,12 @@ async function processTransactionText(ctx, text) {
     const pemasukan = parsed.type === 'pemasukan' ? parsed.amountText : '';
     const pengeluaran = parsed.type === 'pengeluaran' ? parsed.amountText : '';
     const toko = parsed.toko || '';
+    const item = parsed.item || '';
     const tglRow = parsed.tanggal || todayStr;
 
     await appendRow([
       tglRow,
+      item,
       parsed.category,
       toko,
       pemasukan,
@@ -3234,10 +3314,11 @@ async function processTransactionText(ctx, text) {
 
     if (parsed.type === 'pengeluaran') expenseCats.add(parsed.category);
 
+    const itemLabel = item ? `${item} → ` : '';
     const tokoLabel = toko ? ` | toko: ${toko}` : '';
     const noteLabel = parsed.catatan ? ` | #${parsed.catatan}` : '';
     successLines.push(
-      `${parsed.type} | ${parsed.category}${tokoLabel} | ${parsed.amountText}${noteLabel}`
+      `${parsed.type} | ${itemLabel}${parsed.category}${tokoLabel} | ${parsed.amountText}${noteLabel}`
     );
   }
 
@@ -3502,12 +3583,15 @@ bot.on('callback_query', async (ctx) => {
         }
         await formatSheetLayout();
         try { await updateAnalisaSheet(); } catch (e) { logError('Gagal update analisa.', e); }
-        const nilai = deleted.pemasukan || deleted.pengeluaran || '';
+        const nilai = deleted.pengeluaran > 0
+          ? `-${formatRupiah(deleted.pengeluaran)}`
+          : `+${formatRupiah(deleted.pemasukan)}`;
+        const itemLabel = deleted.item ? `${deleted.item} | ` : '';
         const tokoLabel = deleted.toko ? ` | ${deleted.toko}` : '';
         try {
           await ctx.editMessageText(
             'Transaksi dihapus 🗑️\n' +
-            `${deleted.tanggal} | ${deleted.kategori}${tokoLabel} | ${nilai}`
+            `${deleted.tanggal} | ${itemLabel}${deleted.kategori}${tokoLabel} | ${nilai}`
           );
         } catch (e) {}
         return;
@@ -3558,6 +3642,7 @@ bot.on('callback_query', async (ctx) => {
       const pengeluaran = 'Rp' + Math.round(pending.total).toLocaleString('id-ID');
       await appendRow([
         pending.tanggal,
+        pending.item || 'Belanja',
         pending.kategori,
         pending.toko || 'Lainnya',
         '',
@@ -3724,6 +3809,7 @@ async function registerBotCommands() {
       { command: 'laporan', description: 'Laporan + grafik + proyeksi' },
       { command: 'analisa', description: 'Analisa lengkap + grafik' },
       { command: 'budget', description: 'Lihat budget & pemakaian' },
+      { command: 'kategori', description: 'Rincian item per kategori' },
       { command: 'target', description: 'Lihat target tabungan' },
       { command: 'langganan', description: 'Kelola tagihan rutin' },
       { command: 'hutang', description: 'Catatan hutang & piutang' },
