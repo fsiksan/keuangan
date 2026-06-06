@@ -135,31 +135,58 @@ node rekap.js
 | Command | Description |
 |----------|-------------|
 | /start | Start bot and show examples |
-| /help | Show transaction format |
-| /hari | Show today's report |
-| /hari DD MM YYYY | Show report for specific day |
-| /bulan | Show current month report |
-| /bulan MM YYYY | Show report for specific month |
-| /analisa | Build & show financial analysis summary |
+| /help | Bantuan lengkap |
+| /hari [DD MM YYYY] | Rekap harian |
+| /bulan [MM YYYY] | Rekap bulanan |
+| /laporan [MM YYYY] | Laporan + grafik + proyeksi + anomali (kirim gambar chart) |
+| /analisa | Analisa lengkap + grafik di Sheet |
+| /budget | Lihat budget per kategori & pemakaian bulan ini |
+| /target | Lihat target tabungan & progress |
+| /langganan | Kelola tagihan rutin (tambah/hapus/jalan) |
+| /hapus | Hapus transaksi terakhir |
 
 ## Transaction Examples
 
-* masuk airdrop 1.5 jt
-* masuk 20 usdt airdrop
-* masuk $10 freelance
-* keluar wifi 250k
-* keluar rokok 30k
-* keluar bensin 50rb
+* keluar makan 100000 (toko otomatis "Lainnya")
+* keluar makan 100000 di warung agam
+* keluar bensin 50rb di SPBU Shell #isi full
+* masuk gaji 5jt
+* keluar toko=warung Agam kategori=makan 318000  (format label)
 
-## Foto Struk
+Catatan opsional ditambahkan dengan `#` di akhir.
 
-Kirim atau upload foto struk ke bot. Bot akan otomatis membaca nama toko,
-tanggal, kategori, dan total, lalu menyimpannya sebagai pengeluaran.
+## Budget, Target, Langganan
+
+```
+budget makanan 1jt          # set budget bulanan per kategori
+target liburan 5jt          # buat target tabungan
+nabung liburan 500k         # tambah tabungan ke target
+/langganan tambah Netflix; Hiburan; 54000; 1   # tagihan rutin tiap tgl 1
+/langganan jalan            # catat langganan jatuh tempo hari ini
+```
+
+Bot memberi **peringatan budget** otomatis saat pengeluaran kategori mendekati
+(80%) atau melebihi batas, dan **reminder harian** + **langganan otomatis**
+sesuai jadwal (`reminderHour` / `langgananHour` di rekap.json).
+
+## Foto Struk & Suara
+
+* **Foto/upload struk** → dibaca AI, lalu muncul **tombol konfirmasi** untuk
+  ganti kategori / simpan / batal sebelum dicatat.
+* **Pesan suara** → ditranskripsi (butuh `openaiApiKey` + `sttModel`, mis.
+  `whisper-1`) lalu diproses seperti teks ("keluar makan 50rb di warteg").
+
+## Multi-user (keluarga)
+
+Isi `allowedUserIds` (dipisah koma) untuk mengizinkan beberapa user memakai bot
+yang sama. Reminder & langganan otomatis dikirim ke semua user tersebut.
 
 ## Kolom Spreadsheet
 
-| Tanggal | Kategori | Toko | Pemasukan | Pengeluaran |
-|---------|----------|------|-----------|-------------|
+| Tanggal | Kategori | Toko | Pemasukan | Pengeluaran | Catatan |
+|---------|----------|------|-----------|-------------|---------|
+
+Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Analisa**.
 
 ## Sheet Analisa (otomatis + grafik)
 

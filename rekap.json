@@ -1,15 +1,23 @@
 {
   "botToken": "telegramtoken",
   "ownerUserId": "chatid",
+  "allowedUserIds": "",
   "spreadsheetId": "idsheet",
   "sheetName": "Sheet1",
   "analisaSheetName": "Analisa",
+  "budgetSheetName": "Budget",
+  "langgananSheetName": "Langganan",
+  "targetSheetName": "Target",
   "credentialsFile": "./rekap-credentials.json",
   "timezone": "Asia/Jakarta",
+  "reminderEnabled": true,
+  "reminderHour": 20,
+  "langgananHour": 7,
   "llmProvider": "claude",
   "anthropicApiKey": "",
   "anthropicModel": "claude-opus-4-8",
   "openaiBaseUrl": "https://api.openai.com/v1",
   "openaiApiKey": "",
-  "openaiModel": "gpt-4o"
+  "openaiModel": "gpt-4o",
+  "sttModel": "whisper-1"
 }
