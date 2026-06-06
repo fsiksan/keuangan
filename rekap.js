@@ -38,8 +38,8 @@ const pendingReceipts = new Map();
 const mainKeyboard = Markup.keyboard([
   ['/saldo', '/hari', '/minggu', '/bulan'],
   ['/laporan', '/analisa', '/budget', '/target'],
-  ['/langganan', '/cari', '/export', '/hapus'],
-  ['/help']
+  ['/langganan', '/hutang', '/cari', '/export'],
+  ['/edit', '/hapus', '/help']
 ]).resize();
 
 const RECEIPT_CATEGORIES = [
@@ -109,6 +109,10 @@ function getLanggananSheetName() {
 
 function getTargetSheetName() {
   return config.targetSheetName || 'Target';
+}
+
+function getHutangSheetName() {
+  return config.hutangSheetName || 'Hutang';
 }
 
 // Aturan induk kategori untuk pengeluaran (urutan = prioritas)
@@ -1724,6 +1728,123 @@ async function deleteLastTransaction() {
   };
 }
 
+async function editLastTransaction(field, rawValue) {
+  const sheetName = getSheetName();
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A:G`
+  });
+  const rows = res.data.values || [];
+  if (rows.length <= 1) return null;
+
+  const rowNum = rows.length; // baris terakhir (header di baris 1)
+  const last = rows[rows.length - 1];
+  const isIncome = parseRupiahTextToNumber(last[3] || '') > 0;
+  const type = isIncome ? 'pemasukan' : 'pengeluaran';
+
+  let col = null;
+  let value = rawValue;
+
+  if (/^kategori$/i.test(field)) {
+    col = 'B';
+    value = normalizeCategory(rawValue, type);
+  } else if (/^toko$/i.test(field)) {
+    col = 'C';
+    value = rawValue;
+  } else if (/^(nominal|jumlah|nilai)$/i.test(field)) {
+    const amt = await parseMoneyText(rawValue);
+    if (!amt) return { error: 'Nominal tidak valid.' };
+    col = isIncome ? 'D' : 'E';
+    value = amt;
+  } else if (/^(catatan|note)$/i.test(field)) {
+    col = 'F';
+    value = rawValue;
+  } else {
+    return { error: 'Field tidak dikenal. Pilih: kategori / toko / nominal / catatan.' };
+  }
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!${col}${rowNum}`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [[value]] }
+  });
+
+  return {
+    field,
+    value,
+    tanggal: last[0] || '',
+    kategori: col === 'B' ? value : (last[1] || ''),
+  };
+}
+
+// ----- Hutang / Piutang -----
+
+async function getHutang() {
+  const sheetName = getHutangSheetName();
+  await ensureSheetWithHeader(sheetName, ['Nama', 'Jenis', 'Nominal', 'Catatan', 'Tanggal']);
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A2:E`
+  });
+  const rows = res.data.values || [];
+  const list = [];
+  rows.forEach((r, i) => {
+    const nama = (r[0] || '').trim();
+    if (!nama) return;
+    list.push({
+      nama,
+      jenis: (r[1] || '').trim(),
+      nominal: parseRupiahTextToNumber(r[2] || ''),
+      catatan: (r[3] || '').trim(),
+      tanggal: (r[4] || '').trim(),
+      rowNum: i + 2
+    });
+  });
+  return list;
+}
+
+async function addHutang(jenis, nama, nominal, catatan) {
+  const sheetName = getHutangSheetName();
+  await ensureSheetWithHeader(sheetName, ['Nama', 'Jenis', 'Nominal', 'Catatan', 'Tanggal']);
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const tanggal = new Date().toLocaleDateString('id-ID', { timeZone: getTimezone() });
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A:E`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [[nama, jenis, nominal, catatan || '', tanggal]] }
+  });
+}
+
+async function deleteHutangByName(nama) {
+  const sheetName = getHutangSheetName();
+  const list = await getHutang();
+  const matched = list.filter((h) => h.nama.toLowerCase() === nama.toLowerCase());
+  if (matched.length === 0) return 0;
+  const sheetId = await getSheetIdByName(sheetName);
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  // Hapus dari baris terbawah agar index tidak bergeser.
+  const requests = matched
+    .sort((a, b) => b.rowNum - a.rowNum)
+    .map((h) => ({
+      deleteDimension: {
+        range: { sheetId, dimension: 'ROWS', startIndex: h.rowNum - 1, endIndex: h.rowNum }
+      }
+    }));
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: config.spreadsheetId,
+    requestBody: { requests }
+  });
+  return matched.length;
+}
+
 // ----- Laporan bulanan (perbandingan, proyeksi, top, anomali) -----
 
 async function buildMonthlyReport(month, year) {
@@ -2183,6 +2304,11 @@ bot.command('help', async (ctx) => {
     'target hapus <nama>\n' +
     'nabung <nama> <nominal>       (mis: nabung liburan 500k)\n' +
     '\n' +
+    'Hutang & piutang:\n' +
+    'hutang <nama> <nominal>       (kamu pinjam uang)\n' +
+    'piutang <nama> <nominal>      (orang pinjam ke kamu)\n' +
+    'lunas <nama>                  (tandai lunas)\n' +
+    '\n' +
     'Perintah:\n' +
     '/saldo - saldo total & bulan ini\n' +
     '/hari [DD MM YYYY] - rekap harian\n' +
@@ -2195,8 +2321,10 @@ bot.command('help', async (ctx) => {
     '/langganan - kelola tagihan rutin\n' +
     '   /langganan tambah Nama; Kategori; Nominal; Hari\n' +
     '   /langganan jalan | /langganan hapus <nama>\n' +
+    '/hutang - catatan hutang & piutang\n' +
     '/cari <kata> - cari transaksi\n' +
     '/export - unduh data CSV\n' +
+    '/edit - edit transaksi terakhir\n' +
     '/hapus - hapus transaksi terakhir'
   );
 });
@@ -2446,23 +2574,125 @@ bot.command('hapus', async (ctx) => {
   try {
     if (!(await guardOwner(ctx))) return;
 
-    const deleted = await deleteLastTransaction();
-    if (!deleted) {
+    const entries = await getAllEntries();
+    if (entries.length === 0) {
       return ctx.reply('Tidak ada transaksi untuk dihapus.');
+    }
+    const last = entries[entries.length - 1];
+    const nilai = last.pengeluaran > 0
+      ? `-${formatRupiah(last.pengeluaran)}`
+      : `+${formatRupiah(last.pemasukan)}`;
+    const tokoLabel = last.toko ? ` | ${last.toko}` : '';
+
+    return ctx.reply(
+      'Hapus transaksi terakhir ini?\n' +
+      `${last.tanggal} | ${last.kategori}${tokoLabel} | ${nilai}`,
+      {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '🗑️ Ya, hapus', callback_data: 'del|yes' },
+            { text: 'Batal', callback_data: 'del|no' }
+          ]]
+        }
+      }
+    );
+  } catch (err) {
+    logError('Gagal menyiapkan hapus.', err);
+    return ctx.reply('Gagal menyiapkan hapus.');
+  }
+});
+
+bot.command('edit', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    const arg = (ctx.message.text || '').replace(/^\/edit(@\S+)?\s*/i, '').trim();
+    const m = arg.match(/^(kategori|toko|nominal|jumlah|nilai|catatan|note)\s+(.+)$/i);
+
+    if (!m) {
+      const entries = await getAllEntries();
+      let info = '';
+      if (entries.length > 0) {
+        const last = entries[entries.length - 1];
+        const nilai = last.pengeluaran > 0
+          ? formatRupiah(last.pengeluaran)
+          : formatRupiah(last.pemasukan);
+        info = `\n\nTransaksi terakhir:\n${last.tanggal} | ${last.kategori}` +
+          `${last.toko ? ' | ' + last.toko : ''} | ${nilai}` +
+          `${last.catatan ? ' | #' + last.catatan : ''}`;
+      }
+      return ctx.reply(
+        'Edit transaksi terakhir. Format:\n' +
+        '/edit kategori <baru>\n' +
+        '/edit toko <baru>\n' +
+        '/edit nominal <baru>\n' +
+        '/edit catatan <baru>' + info
+      );
+    }
+
+    const result = await editLastTransaction(m[1], m[2].trim());
+    if (!result) {
+      return ctx.reply('Tidak ada transaksi untuk diedit.');
+    }
+    if (result.error) {
+      return ctx.reply(result.error);
     }
 
     await formatSheetLayout();
     try { await updateAnalisaSheet(); } catch (e) { logError('Gagal update analisa.', e); }
 
-    const nilai = deleted.pemasukan || deleted.pengeluaran || '';
-    const tokoLabel = deleted.toko ? ` | ${deleted.toko}` : '';
-    return ctx.reply(
-      'Transaksi terakhir dihapus 🗑️\n' +
-      `${deleted.tanggal} | ${deleted.kategori}${tokoLabel} | ${nilai}`
-    );
+    return ctx.reply(`Transaksi terakhir diperbarui ✅\n${m[1].toLowerCase()} → ${result.value}`);
   } catch (err) {
-    logError('Gagal menghapus transaksi.', err);
-    return ctx.reply('Gagal menghapus transaksi.');
+    logError('Gagal mengedit transaksi.', err);
+    return ctx.reply('Gagal mengedit transaksi.');
+  }
+});
+
+bot.command('hutang', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    const list = await getHutang();
+    if (list.length === 0) {
+      return ctx.reply(
+        'Belum ada catatan hutang/piutang.\n\n' +
+        'Catat dengan:\n' +
+        'hutang <nama> <nominal>   (kamu pinjam uang)\n' +
+        'piutang <nama> <nominal>  (orang pinjam ke kamu)\n' +
+        'Lunas: lunas <nama>'
+      );
+    }
+
+    let totalHutang = 0;
+    let totalPiutang = 0;
+    const hutangLines = [];
+    const piutangLines = [];
+    for (const h of list) {
+      if (/piutang/i.test(h.jenis)) {
+        totalPiutang += h.nominal;
+        piutangLines.push(`- ${h.nama}: ${formatRupiah(h.nominal)}${h.catatan ? ' (' + h.catatan + ')' : ''}`);
+      } else {
+        totalHutang += h.nominal;
+        hutangLines.push(`- ${h.nama}: ${formatRupiah(h.nominal)}${h.catatan ? ' (' + h.catatan + ')' : ''}`);
+      }
+    }
+
+    const lines = ['Hutang & Piutang 🧾', ''];
+    lines.push('Hutang (kamu pinjam):');
+    lines.push(hutangLines.length ? hutangLines.join('\n') : '- tidak ada');
+    lines.push(`Total hutang: ${formatRupiah(totalHutang)}`);
+    lines.push('');
+    lines.push('Piutang (dipinjam orang):');
+    lines.push(piutangLines.length ? piutangLines.join('\n') : '- tidak ada');
+    lines.push(`Total piutang: ${formatRupiah(totalPiutang)}`);
+    lines.push('');
+    lines.push(`Posisi bersih: ${formatRupiah(totalPiutang - totalHutang)}`);
+    lines.push('Lunas: lunas <nama>');
+
+    return ctx.reply(lines.join('\n'));
+  } catch (err) {
+    logError('Gagal menampilkan hutang.', err);
+    return ctx.reply('Gagal menampilkan hutang.');
   }
 });
 
@@ -3134,6 +3364,56 @@ async function handleKeywordText(ctx, text) {
     return true;
   }
 
+  // hutang/piutang <nama> <nominal> [#catatan]
+  const hutangMatch = text.match(/^(hutang|piutang)\s+/i);
+  if (hutangMatch) {
+    const jenis = hutangMatch[1].toLowerCase() === 'hutang' ? 'Hutang' : 'Piutang';
+    let rest = text.replace(/^(hutang|piutang)\s+/i, '').trim();
+    let catatan = '';
+    const hi = rest.indexOf('#');
+    if (hi !== -1) {
+      catatan = rest.slice(hi + 1).trim();
+      rest = rest.slice(0, hi).trim();
+    }
+    const m = rest.match(/^(.+?)\s+(\S+)$/);
+    if (!m) {
+      await ctx.reply(
+        'Format: hutang <nama> <nominal>  (uang yang kamu pinjam)\n' +
+        'atau: piutang <nama> <nominal>  (orang berhutang ke kamu)\n' +
+        'Contoh: hutang budi 200000'
+      );
+      return true;
+    }
+    const amount = await parseAmountToNumber(m[2]);
+    if (!amount) {
+      await ctx.reply('Nominal tidak valid.');
+      return true;
+    }
+    await addHutang(jenis, m[1].trim(), amount, catatan);
+    const label = jenis === 'Hutang' ? 'Hutang (kamu pinjam)' : 'Piutang (dipinjam orang)';
+    await ctx.reply(
+      `${label} dicatat:\n${m[1].trim()} - ${formatRupiah(amount)}\n` +
+      `Tandai lunas dengan: lunas ${m[1].trim()}`
+    );
+    return true;
+  }
+
+  // lunas <nama>
+  if (/^lunas\s+/i.test(text)) {
+    const nama = text.replace(/^lunas\s+/i, '').trim();
+    if (!nama) {
+      await ctx.reply('Format: lunas <nama>');
+      return true;
+    }
+    const n = await deleteHutangByName(nama);
+    await ctx.reply(
+      n > 0
+        ? `${n} catatan hutang/piutang "${nama}" ditandai lunas & dihapus.`
+        : `Tidak ada catatan hutang/piutang untuk "${nama}".`
+    );
+    return true;
+  }
+
   return false;
 }
 
@@ -3205,6 +3485,37 @@ bot.on('callback_query', async (ctx) => {
 
     const data = (ctx.callbackQuery && ctx.callbackQuery.data) || '';
     const parts = data.split('|');
+
+    // Konfirmasi hapus transaksi terakhir
+    if (parts[0] === 'del') {
+      if (parts[1] === 'no') {
+        await ctx.answerCbQuery('Dibatalkan');
+        try { await ctx.editMessageText('Hapus dibatalkan.'); } catch (e) {}
+        return;
+      }
+      if (parts[1] === 'yes') {
+        await ctx.answerCbQuery('Menghapus...');
+        const deleted = await deleteLastTransaction();
+        if (!deleted) {
+          try { await ctx.editMessageText('Tidak ada transaksi untuk dihapus.'); } catch (e) {}
+          return;
+        }
+        await formatSheetLayout();
+        try { await updateAnalisaSheet(); } catch (e) { logError('Gagal update analisa.', e); }
+        const nilai = deleted.pemasukan || deleted.pengeluaran || '';
+        const tokoLabel = deleted.toko ? ` | ${deleted.toko}` : '';
+        try {
+          await ctx.editMessageText(
+            'Transaksi dihapus 🗑️\n' +
+            `${deleted.tanggal} | ${deleted.kategori}${tokoLabel} | ${nilai}`
+          );
+        } catch (e) {}
+        return;
+      }
+      await ctx.answerCbQuery();
+      return;
+    }
+
     if (parts[0] !== 'rc') {
       await ctx.answerCbQuery();
       return;
@@ -3291,6 +3602,7 @@ bot.catch((err) => {
 
 let lastReminderDate = null;
 let lastLanggananDate = null;
+let lastMonthlyReportKey = null;
 
 function getTzParts() {
   const tz = getTimezone();
@@ -3324,6 +3636,41 @@ async function schedulerTick() {
     const reminderEnabled = config.reminderEnabled !== false;
     const reminderHour = Number.isInteger(config.reminderHour) ? config.reminderHour : 20;
     const langgananHour = Number.isInteger(config.langgananHour) ? config.langgananHour : 7;
+    const monthlyReportEnabled = config.monthlyReportEnabled !== false;
+    const monthlyReportHour = Number.isInteger(config.monthlyReportHour) ? config.monthlyReportHour : 8;
+
+    // Laporan bulanan otomatis (tanggal 1, untuk bulan sebelumnya)
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    if (
+      monthlyReportEnabled &&
+      day === 1 &&
+      hour === monthlyReportHour &&
+      lastMonthlyReportKey !== monthKey
+    ) {
+      lastMonthlyReportKey = monthKey;
+      try {
+        let pm = month - 1;
+        let py = year;
+        if (pm < 1) { pm = 12; py -= 1; }
+        const rep = await buildMonthlyReport(pm, py);
+        if (rep.count > 0) {
+          const lines = [`📊 Laporan bulan ${buildMonthLabel(pm, py)}`, ''];
+          lines.push(`Pemasukan: ${formatRupiah(rep.income)}`);
+          lines.push(`Pengeluaran: ${formatRupiah(rep.expense)}`);
+          lines.push(`Saldo: ${formatRupiah(rep.saldo)}`);
+          if (rep.top.length > 0) {
+            lines.push('');
+            lines.push('Top pengeluaran:');
+            rep.top.forEach(([k, v], i) => lines.push(`${i + 1}. ${k}: ${formatRupiah(v)}`));
+          }
+          lines.push('');
+          lines.push('Ketik /laporan untuk detail + grafik.');
+          await broadcast(lines.join('\n'));
+        }
+      } catch (e) {
+        logError('Gagal kirim laporan bulanan.', e);
+      }
+    }
 
     // Langganan jatuh tempo
     if (hour === langgananHour && lastLanggananDate !== dateKey) {
@@ -3379,8 +3726,10 @@ async function registerBotCommands() {
       { command: 'budget', description: 'Lihat budget & pemakaian' },
       { command: 'target', description: 'Lihat target tabungan' },
       { command: 'langganan', description: 'Kelola tagihan rutin' },
+      { command: 'hutang', description: 'Catatan hutang & piutang' },
       { command: 'cari', description: 'Cari transaksi' },
       { command: 'export', description: 'Ekspor data ke CSV' },
+      { command: 'edit', description: 'Edit transaksi terakhir' },
       { command: 'hapus', description: 'Hapus transaksi terakhir' }
     ]);
     logInfo('Menu perintah Telegram terpasang.');

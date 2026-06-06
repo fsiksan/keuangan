@@ -146,9 +146,34 @@ node rekap.js
 | /budget | Lihat budget per kategori & pemakaian bulan ini |
 | /target | Lihat target tabungan & progress |
 | /langganan | Kelola tagihan rutin (tambah/hapus/jalan) |
+| /hutang | Catatan hutang & piutang |
 | /cari <kata> | Cari transaksi (kategori/toko/catatan/pencatat) |
 | /export | Unduh seluruh data sebagai file CSV |
-| /hapus | Hapus transaksi terakhir |
+| /edit | Edit transaksi terakhir (kategori/toko/nominal/catatan) |
+| /hapus | Hapus transaksi terakhir (dengan konfirmasi) |
+
+### Hutang & Piutang
+
+```
+hutang budi 200000        # kamu pinjam uang dari Budi
+piutang andi 150000       # Andi pinjam uang dari kamu
+lunas budi                # tandai lunas (hapus catatan)
+/hutang                   # lihat ringkasan + posisi bersih
+```
+
+### Edit transaksi terakhir
+
+```
+/edit kategori transportasi
+/edit toko Indomaret
+/edit nominal 30000
+/edit catatan beli bensin
+```
+
+### Laporan bulanan otomatis
+
+Setiap tanggal 1 (jam `monthlyReportHour`), bot mengirim ringkasan bulan
+sebelumnya ke semua user. Nonaktifkan dengan `"monthlyReportEnabled": false`.
 
 ### Catat untuk tanggal lampau (backdate)
 
@@ -220,7 +245,7 @@ Reminder & langganan otomatis dikirim ke semua user tersebut.
 | Tanggal | Kategori | Toko | Pemasukan | Pengeluaran | Catatan | Pencatat |
 |---------|----------|------|-----------|-------------|---------|----------|
 
-Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Analisa**.
+Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Hutang**, **Analisa**.
 
 ## Sheet Analisa (otomatis + grafik)
 
