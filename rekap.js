@@ -7,7 +7,7 @@ execSync(
   }
 );
 
-const { Telegraf } = require('telegraf');
+const { Telegraf, Markup } = require('telegraf');
 const { google } = require('googleapis');
 const Anthropic = require('@anthropic-ai/sdk');
 const config = require('./rekap.json');
@@ -33,6 +33,13 @@ const anthropic = anthropicApiKey
 
 // Menyimpan hasil baca struk sementara (menunggu konfirmasi tombol).
 const pendingReceipts = new Map();
+
+// Keyboard pintasan yang muncul di bawah kolom ketik.
+const mainKeyboard = Markup.keyboard([
+  ['/hari', '/bulan', '/laporan'],
+  ['/analisa', '/budget', '/target'],
+  ['/langganan', '/hapus', '/help']
+]).resize();
 
 const RECEIPT_CATEGORIES = [
   'Makanan', 'Minuman', 'Kebutuhan Pokok', 'Transportasi', 'Kesehatan',
@@ -1921,22 +1928,48 @@ bot.start(async (ctx) => {
   if (!(await guardOwner(ctx))) return;
 
   return ctx.reply(
-    'Bot rekap keuangan pribadi aktif.\n' +
+    '👋 Selamat datang di Bot Rekap Keuangan!\n' +
+    'Catat pemasukan & pengeluaran langsung dari chat, otomatis masuk Google Sheets.\n' +
+    '\n' +
+    '✍️ CARA MENGISI (paling mudah):\n' +
+    'keluar <kategori> <nominal>\n' +
+    'masuk <kategori> <nominal>\n' +
+    '\n' +
     'Contoh:\n' +
-    '- keluar makan 100000 (toko otomatis "Lainnya")\n' +
-    '- keluar makan 100000 di warung agam\n' +
-    '- masuk gaji 5jt\n' +
-    '- keluar wifi 150000 #bayar bulanan\n' +
+    '• keluar makan 25000\n' +
+    '• keluar makan 25000 di warung agam\n' +
+    '• keluar bensin 50rb di SPBU #isi full\n' +
+    '• masuk gaji 5jt\n' +
     '\n' +
-    'Kirim foto struk 🧾 atau pesan suara 🎙️ untuk dicatat otomatis.\n' +
+    'Keterangan:\n' +
+    '• "di <toko>" → mengisi kolom Toko (opsional)\n' +
+    '• "#catatan" → menambah catatan (opsional)\n' +
+    '• Nominal bisa: 25000, 25rb, 1,5jt, 20 usdt, $10\n' +
+    '• Kategori otomatis dirapikan (makan/makanan → Makanan)\n' +
     '\n' +
-    'Perintah:\n' +
-    '/hari · /bulan · /laporan - rekap\n' +
-    '/analisa - analisa + grafik\n' +
-    '/budget · /target · /langganan\n' +
-    '/hapus - hapus transaksi terakhir\n' +
-    '/help - bantuan lengkap'
+    '🧾 STRUK & 🎙️ SUARA:\n' +
+    '• Kirim foto struk → bot baca otomatis, lalu konfirmasi via tombol\n' +
+    '• Kirim pesan suara → diketik ulang & dicatat\n' +
+    '\n' +
+    '💰 BUDGET & TARGET:\n' +
+    '• budget makanan 1jt → batas bulanan (bot ingatkan jika hampir/lewat)\n' +
+    '• target liburan 5jt → buat target nabung\n' +
+    '• nabung liburan 500k → tambah tabungan\n' +
+    '\n' +
+    '🔁 LANGGANAN (tagihan rutin):\n' +
+    '• /langganan tambah Netflix; Hiburan; 54000; 1\n' +
+    '\n' +
+    '📊 LIHAT LAPORAN:\n' +
+    '/hari · /bulan · /laporan · /analisa\n' +
+    '\n' +
+    'Tekan tombol di bawah atau ketik /help untuk panduan lengkap. 👇',
+    mainKeyboard
   );
+});
+
+bot.command('menu', async (ctx) => {
+  if (!(await guardOwner(ctx))) return;
+  return ctx.reply('Menu pintasan 👇', mainKeyboard);
 });
 
 bot.command('help', async (ctx) => {
@@ -2956,9 +2989,32 @@ async function schedulerTick() {
   }
 }
 
+async function registerBotCommands() {
+  try {
+    await bot.telegram.setMyCommands([
+      { command: 'start', description: 'Mulai & petunjuk penggunaan' },
+      { command: 'help', description: 'Panduan lengkap' },
+      { command: 'menu', description: 'Tampilkan tombol pintasan' },
+      { command: 'hari', description: 'Rekap hari ini' },
+      { command: 'bulan', description: 'Rekap bulan ini' },
+      { command: 'laporan', description: 'Laporan + grafik + proyeksi' },
+      { command: 'analisa', description: 'Analisa lengkap + grafik' },
+      { command: 'budget', description: 'Lihat budget & pemakaian' },
+      { command: 'target', description: 'Lihat target tabungan' },
+      { command: 'langganan', description: 'Kelola tagihan rutin' },
+      { command: 'hapus', description: 'Hapus transaksi terakhir' }
+    ]);
+    logInfo('Menu perintah Telegram terpasang.');
+  } catch (e) {
+    logError('Gagal memasang menu perintah.', e);
+  }
+}
+
 logInfo('Started bot...');
 
-bot.launch().catch((err) => {
+bot.launch().then(() => {
+  registerBotCommands();
+}).catch((err) => {
   logError('Launch error:', err);
 });
 

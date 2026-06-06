@@ -134,8 +134,9 @@ node rekap.js
 
 | Command | Description |
 |----------|-------------|
-| /start | Start bot and show examples |
+| /start | Petunjuk pengisian & penggunaan + tombol pintasan |
 | /help | Bantuan lengkap |
+| /menu | Tampilkan tombol pintasan |
 | /hari [DD MM YYYY] | Rekap harian |
 | /bulan [MM YYYY] | Rekap bulanan |
 | /laporan [MM YYYY] | Laporan + grafik + proyeksi + anomali (kirim gambar chart) |
