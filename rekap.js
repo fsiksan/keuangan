@@ -41,9 +41,9 @@ let lastDeletedRow = null;
 const mainKeyboard = Markup.keyboard([
   ['/ringkasan', '/saldo', '/hari', '/minggu', '/bulan'],
   ['/laporan', '/analisa', '/kategori', '/tips'],
-  ['/budget', '/target', '/langganan', '/hutang', '/neraca'],
-  ['/cari', '/export', '/edit', '/hapus', '/batal'],
-  ['/help']
+  ['/budget', '/target', '/langganan', '/hutang'],
+  ['/neraca', '/akun', '/cari', '/export'],
+  ['/edit', '/hapus', '/batal', '/help']
 ]).resize();
 
 const RECEIPT_CATEGORIES = [
@@ -303,7 +303,7 @@ async function getAllEntries() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:H`,
+    range: `'${sheetName}'!A:I`,
   });
 
   const rows = res.data.values || [];
@@ -320,6 +320,7 @@ async function getAllEntries() {
     const pengeluaran = row[5] || '';
     const catatan = row[6] || '';
     const pencatat = row[7] || '';
+    const akun = (row[8] || '').trim() || 'Kas';
 
     const parsedDate = parseDateParts(tanggal);
     if (!parsedDate) continue;
@@ -333,6 +334,7 @@ async function getAllEntries() {
       pengeluaran: parseRupiahTextToNumber(pengeluaran),
       catatan,
       pencatat,
+      akun,
       parsedDate,
     });
   }
@@ -394,7 +396,7 @@ async function appendRow(values) {
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:H`,
+    range: `'${sheetName}'!A:I`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
       values: [values],
@@ -411,7 +413,7 @@ async function ensureHeader() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A1:H2`,
+    range: `'${sheetName}'!A1:I2`,
   });
 
   const values = res.data.values || [];
@@ -424,12 +426,13 @@ async function ensureHeader() {
     header[2] !== 'Kategori' ||
     header[5] !== 'Pengeluaran' ||
     header[6] !== 'Catatan' ||
-    header[7] !== 'Pencatat';
+    header[7] !== 'Pencatat' ||
+    header[8] !== 'Akun';
 
   if (needsHeader) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: config.spreadsheetId,
-      range: `'${sheetName}'!A1:H1`,
+      range: `'${sheetName}'!A1:I1`,
       valueInputOption: 'RAW',
       requestBody: {
         values: [[
@@ -440,7 +443,8 @@ async function ensureHeader() {
           'Pemasukan',
           'Pengeluaran',
           'Catatan',
-          'Pencatat'
+          'Pencatat',
+          'Akun'
         ]]
       }
     });
@@ -468,7 +472,7 @@ async function formatSheetLayout() {
 
   const valueRes = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:H`,
+    range: `'${sheetName}'!A:I`,
   });
 
   const values = valueRes.data.values || [];
@@ -496,7 +500,7 @@ async function formatSheetLayout() {
               startRowIndex: 0,
               endRowIndex: 1,
               startColumnIndex: 0,
-              endColumnIndex: 8
+              endColumnIndex: 9
             },
             cell: {
               userEnteredFormat: {
@@ -586,7 +590,7 @@ async function formatSheetLayout() {
               startRowIndex: 1,
               endRowIndex: lastRow,
               startColumnIndex: 6,
-              endColumnIndex: 8
+              endColumnIndex: 9
             },
             cell: {
               userEnteredFormat: {
@@ -608,7 +612,7 @@ async function formatSheetLayout() {
                 startRowIndex: 0,
                 endRowIndex: lastRow,
                 startColumnIndex: 0,
-                endColumnIndex: 8
+                endColumnIndex: 9
               }
             }
           }
@@ -698,13 +702,27 @@ async function formatSheetLayout() {
           }
         },
         {
+          updateDimensionProperties: {
+            range: {
+              sheetId,
+              dimension: 'COLUMNS',
+              startIndex: 8,
+              endIndex: 9
+            },
+            properties: {
+              pixelSize: 120
+            },
+            fields: 'pixelSize'
+          }
+        },
+        {
           updateBorders: {
             range: {
               sheetId,
               startRowIndex: 0,
               endRowIndex: lastRow,
               startColumnIndex: 0,
-              endColumnIndex: 8
+              endColumnIndex: 9
             },
             top: {
               style: 'SOLID',
@@ -1254,11 +1272,11 @@ async function updateAnalisaSheet() {
     requestBody: { requests },
   });
 
-  // Perbarui Kas otomatis di Neraca (saldo = pemasukan - pengeluaran).
+  // Perbarui saldo tiap akun di Neraca (otomatis dari transaksi).
   try {
-    await refreshKas(saldo);
+    await refreshAccounts(entries);
   } catch (e) {
-    logError('Gagal memperbarui Kas di Neraca.', e);
+    logError('Gagal memperbarui akun di Neraca.', e);
   }
 
   return {
@@ -1965,7 +1983,8 @@ async function runDueLangganan(day, month, year) {
       isIncome ? nominalStr : '',
       isIncome ? '' : nominalStr,
       tag,
-      'Langganan'
+      'Langganan',
+      'Kas'
     ]);
     posted.push(l);
   }
@@ -1985,7 +2004,7 @@ async function deleteLastTransaction() {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:H`
+    range: `'${sheetName}'!A:I`
   });
   const rows = res.data.values || [];
   if (rows.length <= 1) return null;
@@ -2020,7 +2039,7 @@ async function editLastTransaction(field, rawValue) {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:H`
+    range: `'${sheetName}'!A:I`
   });
   const rows = res.data.values || [];
   if (rows.length <= 1) return null;
@@ -2050,8 +2069,11 @@ async function editLastTransaction(field, rawValue) {
   } else if (/^(catatan|note)$/i.test(field)) {
     col = 'G';
     value = rawValue;
+  } else if (/^(akun|dompet)$/i.test(field)) {
+    col = 'I';
+    value = titleCase(rawValue);
   } else {
-    return { error: 'Field tidak dikenal. Pilih: item / kategori / toko / nominal / catatan.' };
+    return { error: 'Field tidak dikenal. Pilih: item / kategori / toko / nominal / catatan / akun.' };
   }
 
   await sheets.spreadsheets.values.update({
@@ -2129,9 +2151,15 @@ async function deleteHutangByName(nama) {
   return matched.length;
 }
 
-// ----- Neraca (balance sheet): aset & liabilitas -----
+// ----- Neraca (balance sheet): aset & liabilitas + akun otomatis -----
 
-const NERACA_HEADER = ['Tipe', 'Nama', 'Nilai'];
+const NERACA_HEADER = ['Tipe', 'Nama', 'Nilai', 'Sumber'];
+
+function neracaTipeOf(raw) {
+  return /liab|kewajiban|utang|hutang/.test(String(raw || '').toLowerCase())
+    ? 'Liabilitas'
+    : 'Aset';
+}
 
 async function getNeraca() {
   const sheetName = getNeracaSheetName();
@@ -2140,52 +2168,68 @@ async function getNeraca() {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A2:C`
+    range: `'${sheetName}'!A2:D`
   });
   const rows = res.data.values || [];
   const list = [];
   rows.forEach((r, i) => {
-    const tipeRaw = (r[0] || '').trim().toLowerCase();
     const nama = (r[1] || '').trim();
     if (!nama) return;
-    const tipe = /liab|kewajiban|utang|hutang/.test(tipeRaw) ? 'Liabilitas' : 'Aset';
-    list.push({ tipe, nama, nilai: parseRupiahTextToNumber(r[2] || ''), rowNum: i + 2 });
+    list.push({
+      tipe: neracaTipeOf(r[0]),
+      nama,
+      nilai: parseRupiahTextToNumber(r[2] || ''),
+      sumber: (r[3] || '').trim().toLowerCase() === 'auto' ? 'auto' : 'manual',
+      rowNum: i + 2
+    });
   });
   return list;
 }
 
-// Set/perbarui nilai kas otomatis (saldo dari transaksi).
-async function refreshKas(saldo) {
+// Perbarui saldo tiap akun (otomatis) sebagai aset; baris manual dipertahankan.
+async function refreshAccounts(entries) {
   const sheetName = getNeracaSheetName();
   await ensureSheetWithHeader(sheetName, NERACA_HEADER);
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
+
+  const net = {};
+  for (const e of entries) {
+    const a = e.akun || 'Kas';
+    net[a] = (net[a] || 0) + e.pemasukan - e.pengeluaran;
+  }
+  if (!('Kas' in net)) net['Kas'] = 0;
+
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A2:C`
+    range: `'${sheetName}'!A2:D`
   });
   const rows = res.data.values || [];
-  let foundRow = -1;
-  for (let i = 0; i < rows.length; i++) {
-    if ((rows[i][1] || '').trim().toLowerCase() === 'kas') { foundRow = i; break; }
-  }
-  if (foundRow >= 0) {
+
+  const accNamesLower = new Set(Object.keys(net).map((n) => n.toLowerCase()));
+  const manualRows = rows
+    .filter((r) => (r[1] || '').trim())
+    .filter((r) => (r[3] || '').trim().toLowerCase() !== 'auto')
+    .filter((r) => !accNamesLower.has((r[1] || '').trim().toLowerCase()))
+    .map((r) => [neracaTipeOf(r[0]), (r[1] || '').trim(), parseRupiahTextToNumber(r[2] || ''), 'manual']);
+
+  const autoRows = Object.keys(net)
+    .sort((a, b) => (a === 'Kas' ? -1 : b === 'Kas' ? 1 : a.localeCompare(b)))
+    .map((acc) => ['Aset', acc, Math.round(net[acc]), 'auto']);
+
+  const newData = [...autoRows, ...manualRows];
+
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A2:D1000`
+  });
+  if (newData.length > 0) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: config.spreadsheetId,
-      range: `'${sheetName}'!A${foundRow + 2}:C${foundRow + 2}`,
+      range: `'${sheetName}'!A2`,
       valueInputOption: 'RAW',
-      requestBody: { values: [['Aset', 'Kas', Math.round(saldo)]] }
+      requestBody: { values: newData }
     });
-  } else {
-    // Sisipkan Kas sebagai baris pertama data.
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: config.spreadsheetId,
-      range: `'${sheetName}'!A2:C2`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [['Aset', 'Kas', Math.round(saldo)]] }
-    });
-    // Bila A2 sebelumnya berisi data user, pindahkan? Untuk amannya, append data lama tidak diutak-atik;
-    // skenario ini hanya terjadi saat sheet baru (kosong), jadi aman.
   }
 }
 
@@ -2197,13 +2241,16 @@ async function addNeracaItem(tipe, nama, nilai) {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A2:C`
+    range: `'${sheetName}'!A2:D`
   });
   const rows = res.data.values || [];
   let foundRow = -1;
   for (let i = 0; i < rows.length; i++) {
-    const t = /liab|kewajiban|utang|hutang/.test((rows[i][0] || '').toLowerCase()) ? 'Liabilitas' : 'Aset';
-    if (t === canonTipe && (rows[i][1] || '').trim().toLowerCase() === nama.toLowerCase()) {
+    if (
+      neracaTipeOf(rows[i][0]) === canonTipe &&
+      (rows[i][1] || '').trim().toLowerCase() === nama.toLowerCase() &&
+      (rows[i][3] || '').trim().toLowerCase() !== 'auto'
+    ) {
       foundRow = i;
       break;
     }
@@ -2211,16 +2258,16 @@ async function addNeracaItem(tipe, nama, nilai) {
   if (foundRow >= 0) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: config.spreadsheetId,
-      range: `'${sheetName}'!A${foundRow + 2}:C${foundRow + 2}`,
+      range: `'${sheetName}'!A${foundRow + 2}:D${foundRow + 2}`,
       valueInputOption: 'RAW',
-      requestBody: { values: [[canonTipe, nama, Math.round(nilai)]] }
+      requestBody: { values: [[canonTipe, nama, Math.round(nilai), 'manual']] }
     });
   } else {
     await sheets.spreadsheets.values.append({
       spreadsheetId: config.spreadsheetId,
-      range: `'${sheetName}'!A:C`,
+      range: `'${sheetName}'!A:D`,
       valueInputOption: 'RAW',
-      requestBody: { values: [[canonTipe, nama, Math.round(nilai)]] }
+      requestBody: { values: [[canonTipe, nama, Math.round(nilai), 'manual']] }
     });
   }
   return canonTipe;
@@ -2230,7 +2277,9 @@ async function deleteNeracaItem(tipe, nama) {
   const sheetName = getNeracaSheetName();
   const canonTipe = tipe === 'Liabilitas' ? 'Liabilitas' : 'Aset';
   const list = await getNeraca();
-  const found = list.find((x) => x.tipe === canonTipe && x.nama.toLowerCase() === nama.toLowerCase());
+  const found = list.find(
+    (x) => x.tipe === canonTipe && x.nama.toLowerCase() === nama.toLowerCase() && x.sumber !== 'auto'
+  );
   if (!found) return false;
   const sheetId = await getSheetIdByName(sheetName);
   const client = await auth.getClient();
@@ -2496,6 +2545,18 @@ function extractLabeledField(text, key) {
   return m ? m[1].trim() : '';
 }
 
+function extractAkunToken(text) {
+  // Mendukung "pakai gopay", "pake bank bca", "akun=ovo", "dompet kas"
+  const re = /\b(?:pakai|pake|dompet|akun)\s*[:=]?\s*(.+?)(?=\s+di\s+|$)/i;
+  const m = text.match(re);
+  if (!m || !m[1].trim()) return { akun: '', rest: text };
+  const akun = titleCase(m[1].trim());
+  const rest = (text.slice(0, m.index) + ' ' + text.slice(m.index + m[0].length))
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { akun, rest };
+}
+
 function extractDateToken(text) {
   // Mendukung "tgl 5", "tgl 5/6", "tanggal 5/6/2026"
   const re = /\b(?:tgl|tanggal)\s+(\d{1,2})(?:[\/-](\d{1,2}))?(?:[\/-](\d{2,4}))?\b/i;
@@ -2531,6 +2592,11 @@ async function parseTransaction(text) {
     catatan = raw.slice(noteIdx + 1).trim();
     raw = raw.slice(0, noteIdx).trim();
   }
+
+  // Ekstrak akun/dompet opsional ("pakai gopay", "akun=bank bca")
+  const akunInfo = extractAkunToken(raw);
+  const akun = akunInfo.akun;
+  raw = akunInfo.rest;
 
   // Ekstrak tanggal opsional ("tgl 5", "tanggal 5/6/2026")
   const dateInfo = extractDateToken(raw);
@@ -2569,6 +2635,7 @@ async function parseTransaction(text) {
       toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
       catatan,
       tanggal,
+      akun,
       amountText
     };
   }
@@ -2614,6 +2681,7 @@ async function parseTransaction(text) {
     toko: type === 'pemasukan' ? '' : (toko || 'Lainnya'),
     catatan,
     tanggal,
+    akun,
     amountText
   };
 }
@@ -2637,6 +2705,7 @@ bot.start(async (ctx) => {
     '\n' +
     'Keterangan:\n' +
     '• "di <toko>" → mengisi kolom Toko (opsional)\n' +
+    '• "pakai <akun>" → pilih dompet/akun, mis. pakai gopay (opsional)\n' +
     '• "#catatan" → menambah catatan (opsional)\n' +
     '• Nominal bisa: 25000, 25rb, 1,5jt, 20 usdt, $10\n' +
     '• Kategori otomatis dirapikan (makan/makanan → Makanan)\n' +
@@ -2741,7 +2810,8 @@ bot.command('help', async (ctx) => {
     '   /langganan tambah Nama; Kategori; Nominal; Hari\n' +
     '   /langganan jalan | /langganan hapus <nama>\n' +
     '/hutang - catatan hutang & piutang\n' +
-    '/neraca - aset, liabilitas, ekuitas (Kas otomatis)\n' +
+    '/neraca - aset, liabilitas, ekuitas (akun otomatis)\n' +
+    '/akun - saldo per akun/dompet\n' +
     '/cari <kata> - cari transaksi\n' +
     '/export [MM YYYY] - unduh data CSV (semua / per bulan)\n' +
     '/edit - edit transaksi terakhir (item/kategori/toko/nominal/catatan)\n' +
@@ -3621,7 +3691,7 @@ bot.command('export', async (ctx) => {
     const sheets = google.sheets({ version: 'v4', auth: client });
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: config.spreadsheetId,
-      range: `'${getSheetName()}'!A:H`
+      range: `'${getSheetName()}'!A:I`
     });
     const rows = res.data.values || [];
     if (rows.length <= 1) {
@@ -3727,7 +3797,7 @@ async function runMigration() {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.spreadsheetId,
-    range: `'${sheetName}'!A:H`
+    range: `'${sheetName}'!A:I`
   });
   const rows = res.data.values || [];
   if (rows.length <= 1) return 0;
@@ -3759,31 +3829,35 @@ bot.command('neraca', async (ctx) => {
   try {
     if (!(await guardOwner(ctx))) return;
 
-    // Pastikan Kas terbaru.
-    let saldo = 0;
+    // Perbarui saldo tiap akun dulu.
     try {
       const entries = await getAllEntries();
-      for (const e of entries) saldo += e.pemasukan - e.pengeluaran;
-      await refreshKas(saldo);
+      await refreshAccounts(entries);
     } catch (e) {
-      logError('Gagal hitung kas untuk neraca.', e);
+      logError('Gagal hitung akun untuk neraca.', e);
     }
 
     const list = await getNeraca();
-    const aset = list.filter((x) => x.tipe === 'Aset');
+    const akunRows = list.filter((x) => x.tipe === 'Aset' && x.sumber === 'auto');
+    const asetManual = list.filter((x) => x.tipe === 'Aset' && x.sumber !== 'auto');
     const liab = list.filter((x) => x.tipe === 'Liabilitas');
-    const totalAset = aset.reduce((s, x) => s + x.nilai, 0);
+    const totalAset = list.filter((x) => x.tipe === 'Aset').reduce((s, x) => s + x.nilai, 0);
     const totalLiab = liab.reduce((s, x) => s + x.nilai, 0);
     const ekuitas = totalAset - totalLiab;
 
     const lines = ['🏦 NERACA (Balance Sheet)', ''];
-    lines.push('💰 ASET');
-    if (aset.length === 0) {
-      lines.push('- (belum ada)');
+    lines.push('💳 AKUN/DOMPET (otomatis)');
+    if (akunRows.length === 0) {
+      lines.push('- (belum ada transaksi)');
     } else {
-      for (const x of aset) lines.push(`- ${x.nama}: ${formatRupiah(x.nilai)}`);
+      for (const x of akunRows) lines.push(`- ${x.nama}: ${formatRupiah(x.nilai)}`);
     }
-    lines.push(`Total Aset: ${formatRupiah(totalAset)}`);
+    if (asetManual.length > 0) {
+      lines.push('');
+      lines.push('💰 ASET LAIN');
+      for (const x of asetManual) lines.push(`- ${x.nama}: ${formatRupiah(x.nilai)}`);
+    }
+    lines.push(`\nTotal Aset: ${formatRupiah(totalAset)}`);
     lines.push('');
     lines.push('📕 LIABILITAS');
     if (liab.length === 0) {
@@ -3795,13 +3869,44 @@ bot.command('neraca', async (ctx) => {
     lines.push('');
     lines.push(`💎 EKUITAS (kekayaan bersih): ${formatRupiah(ekuitas)}`);
     lines.push('');
-    lines.push('Kas terisi otomatis dari transaksi.');
-    lines.push('Tambah: aset <nama> <nominal> / liabilitas <nama> <nominal>');
+    lines.push('Saldo akun terisi otomatis dari transaksi (mis. "keluar ... pakai gopay").');
+    lines.push('Tambah aset lain: aset <nama> <nominal> · liabilitas <nama> <nominal>');
 
     return ctx.reply(lines.join('\n'));
   } catch (err) {
     logError('Gagal menampilkan neraca.', err);
     return ctx.reply('Gagal menampilkan neraca.');
+  }
+});
+
+bot.command('akun', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    const entries = await getAllEntries();
+    const net = {};
+    for (const e of entries) {
+      const a = e.akun || 'Kas';
+      net[a] = (net[a] || 0) + e.pemasukan - e.pengeluaran;
+    }
+    if (!('Kas' in net)) net['Kas'] = 0;
+
+    const sorted = Object.keys(net).sort((a, b) =>
+      a === 'Kas' ? -1 : b === 'Kas' ? 1 : a.localeCompare(b)
+    );
+    const total = Object.values(net).reduce((s, v) => s + v, 0);
+
+    const lines = ['💳 Saldo per Akun/Dompet', ''];
+    for (const a of sorted) lines.push(`- ${a}: ${formatRupiah(Math.round(net[a]))}`);
+    lines.push('');
+    lines.push(`Total: ${formatRupiah(Math.round(total))}`);
+    lines.push('');
+    lines.push('Pakai akun saat catat: "keluar makan 25rb pakai gopay"');
+
+    return ctx.reply(lines.join('\n'));
+  } catch (err) {
+    logError('Gagal menampilkan akun.', err);
+    return ctx.reply('Gagal menampilkan akun.');
   }
 });
 
@@ -4019,6 +4124,7 @@ async function processTransactionText(ctx, text) {
     const pengeluaran = parsed.type === 'pengeluaran' ? parsed.amountText : '';
     const toko = parsed.toko || '';
     const item = parsed.item || '';
+    const akun = parsed.akun || 'Kas';
     const tglRow = parsed.tanggal || todayStr;
 
     await appendRow([
@@ -4029,16 +4135,18 @@ async function processTransactionText(ctx, text) {
       pemasukan,
       pengeluaran,
       parsed.catatan || '',
-      pencatat
+      pencatat,
+      akun
     ]);
 
     if (parsed.type === 'pengeluaran') expenseCats.add(parsed.category);
 
     const itemLabel = item ? `${item} → ` : '';
     const tokoLabel = toko ? ` | toko: ${toko}` : '';
+    const akunLabel = akun && akun !== 'Kas' ? ` | 💳 ${akun}` : '';
     const noteLabel = parsed.catatan ? ` | #${parsed.catatan}` : '';
     successLines.push(
-      `${parsed.type} | ${itemLabel}${parsed.category}${tokoLabel} | ${parsed.amountText}${noteLabel}`
+      `${parsed.type} | ${itemLabel}${parsed.category}${tokoLabel}${akunLabel} | ${parsed.amountText}${noteLabel}`
     );
   }
 
@@ -4476,7 +4584,8 @@ bot.on('callback_query', async (ctx) => {
         '',
         pengeluaran,
         'Struk',
-        pending.pencatat || getUserName(ctx)
+        pending.pencatat || getUserName(ctx),
+        'Kas'
       ]);
       await formatSheetLayout();
       try { await updateAnalisaSheet(); } catch (e) { logError('Gagal update analisa.', e); }
@@ -4632,6 +4741,7 @@ async function registerBotCommands() {
       { command: 'menu', description: 'Tampilkan tombol pintasan' },
       { command: 'ringkasan', description: 'Ringkasan keuangan (dashboard)' },
       { command: 'neraca', description: 'Neraca: aset, liabilitas, ekuitas' },
+      { command: 'akun', description: 'Saldo per akun/dompet' },
       { command: 'saldo', description: 'Saldo total & bulan ini' },
       { command: 'hari', description: 'Rekap hari ini' },
       { command: 'minggu', description: 'Rekap 7 hari terakhir' },

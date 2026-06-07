@@ -150,7 +150,8 @@ node rekap.js
 | /target | Lihat target tabungan & progress |
 | /langganan | Kelola tagihan rutin (tambah/hapus/jalan) |
 | /hutang | Catatan hutang & piutang |
-| /neraca | Neraca: aset, liabilitas, ekuitas (Kas otomatis) |
+| /neraca | Neraca: aset, liabilitas, ekuitas (akun otomatis) |
+| /akun | Saldo per akun/dompet (Kas, Bank, GoPay, ...) |
 | /cari <kata> | Cari transaksi (kategori/toko/catatan/pencatat) |
 | /export [MM YYYY] | Unduh data CSV (semua atau per bulan) |
 | /edit | Edit transaksi terakhir (item/kategori/toko/nominal/catatan) |
@@ -171,10 +172,21 @@ aset hapus Emas            # hapus item
 /neraca                    # lihat neraca lengkap
 ```
 
-Baris **Kas** terisi & diperbarui **otomatis** dari transaksi (saldo =
-pemasukan − pengeluaran), jadi setiap pencatatan langsung memengaruhi neraca.
-Item lain (bank, emas, properti, utang) diinput manual lewat perintah di atas
-atau langsung di sheet **Neraca** (kolom: Tipe, Nama, Nilai).
+### Akun / Dompet (multi-rekening)
+
+Setiap transaksi bisa menyebut **akun/dompet** dengan `pakai <akun>`:
+```
+keluar makan 25rb pakai gopay
+masuk gaji 5jt pakai bank bca
+keluar belanja 200rb pakai bank bca di Indomaret
+```
+Saldo tiap akun (Kas, GoPay, Bank BCA, ...) dihitung **otomatis** dari transaksi
+dan tampil sebagai aset di **Neraca**. Tanpa `pakai`, akun default = **Kas**.
+Lihat ringkas via `/akun`.
+
+Item lain (emas, properti, utang) diinput manual lewat perintah `aset`/`liabilitas`
+atau langsung di sheet **Neraca** (kolom: Tipe, Nama, Nilai, Sumber). Baris dengan
+Sumber `auto` dikelola bot (saldo akun); jangan diubah manual.
 
 ### Hutang & Piutang
 
