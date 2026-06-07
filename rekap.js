@@ -1719,6 +1719,142 @@ async function setBudget(kategori, amount) {
   return canon;
 }
 
+// Hitung ulang kolom Terpakai/Sisa, percantik, dan tambah grafik di sheet Budget.
+async function refreshBudgetSheet(month, year) {
+  const sheetName = getBudgetSheetName();
+  await ensureSheetWithHeader(sheetName, ['Kategori', 'Budget Bulanan']);
+  const sheetId = await getSheetIdByName(sheetName);
+  if (sheetId == null) return;
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A2:B`
+  });
+  const rows = res.data.values || [];
+  const dataRows = rows.filter((r) => (r[0] || '').trim());
+  if (dataRows.length === 0) return;
+
+  // Hitung pemakaian per kategori bulan ini.
+  const entries = await getAllEntries();
+  const spent = {};
+  for (const e of entries) {
+    if (e.pengeluaran > 0 && e.parsedDate.month === month && e.parsedDate.year === year) {
+      const k = normalizeCategory(e.kategori, 'pengeluaran');
+      spent[k] = (spent[k] || 0) + e.pengeluaran;
+    }
+  }
+
+  const cd = dataRows.map((r) => {
+    const kat = normalizeCategory((r[0] || '').trim(), 'pengeluaran');
+    const budget = parseRupiahTextToNumber(r[1] || '');
+    const terpakai = spent[kat] || 0;
+    return [terpakai, budget - terpakai];
+  });
+
+  // Header C1:D1 + nilai C2:D
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!C1:D1`,
+    valueInputOption: 'RAW',
+    requestBody: { values: [['Terpakai (bln ini)', 'Sisa']] }
+  });
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!C2:D${dataRows.length + 1}`,
+    valueInputOption: 'RAW',
+    requestBody: { values: cd }
+  });
+
+  const lastRow = dataRows.length + 1;
+  const font = getSheetFont();
+  const currency = { numberFormat: { type: 'CURRENCY', pattern: '"Rp"#,##0' } };
+  const existing = await getChartIds(sheets, sheetId);
+  const requests = [];
+
+  for (const id of existing) requests.push({ deleteEmbeddedObject: { objectId: id } });
+
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 4 },
+      cell: { userEnteredFormat: { textFormat: { fontFamily: font } } },
+      fields: 'userEnteredFormat.textFormat.fontFamily'
+    }
+  });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 4 },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 0.18, green: 0.49, blue: 0.36 },
+          textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 }, fontFamily: font },
+          horizontalAlignment: 'CENTER'
+        }
+      },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment'
+    }
+  });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: 1, endColumnIndex: 4 },
+      cell: { userEnteredFormat: currency },
+      fields: 'userEnteredFormat.numberFormat'
+    }
+  });
+  requests.push({
+    updateSheetProperties: {
+      properties: { sheetId, gridProperties: { frozenRowCount: 1 } },
+      fields: 'gridProperties.frozenRowCount'
+    }
+  });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 }, properties: { pixelSize: 150 }, fields: 'pixelSize' } });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 4 }, properties: { pixelSize: 140 }, fields: 'pixelSize' } });
+
+  // Grafik kolom: Budget vs Terpakai per kategori
+  requests.push({
+    addChart: {
+      chart: {
+        spec: {
+          title: 'Budget vs Terpakai',
+          basicChart: {
+            chartType: 'COLUMN',
+            legendPosition: 'BOTTOM_LEGEND',
+            headerCount: 1,
+            domains: [{ domain: { sourceRange: { sources: [{ sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 1 }] } } }],
+            series: [
+              { series: { sourceRange: { sources: [{ sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 1, endColumnIndex: 2 }] } } },
+              { series: { sourceRange: { sources: [{ sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 2, endColumnIndex: 3 }] } } }
+            ]
+          }
+        },
+        position: {
+          overlayPosition: {
+            anchorCell: { sheetId, rowIndex: 1, columnIndex: 5 },
+            offsetXPixels: 5, offsetYPixels: 5, widthPixels: 480, heightPixels: 300
+          }
+        }
+      }
+    }
+  });
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: config.spreadsheetId,
+    requestBody: { requests }
+  });
+
+  if (config.budgetImageUrl) {
+    try {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: config.spreadsheetId,
+        range: `'${sheetName}'!I1`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [[`=IMAGE("${config.budgetImageUrl}")`]] }
+      });
+    } catch (e) { logError('Gagal pasang gambar budget.', e); }
+  }
+}
+
 async function deleteBudget(kategori) {
   const sheetName = getBudgetSheetName();
   const canon = normalizeCategory(kategori, 'pengeluaran');
@@ -2295,6 +2431,166 @@ async function deleteNeracaItem(tipe, nama) {
     }
   });
   return true;
+}
+
+async function getChartIds(sheets, sheetId) {
+  try {
+    const meta = await sheets.spreadsheets.get({
+      spreadsheetId: config.spreadsheetId,
+      fields: 'sheets(properties/sheetId,charts/chartId)'
+    });
+    const t = (meta.data.sheets || []).find((s) => s.properties.sheetId === sheetId);
+    return ((t && t.charts) || []).map((c) => c.chartId);
+  } catch (e) {
+    logError('Gagal baca chart.', e);
+    return [];
+  }
+}
+
+function getSheetFont() {
+  return config.sheetFont || 'Roboto';
+}
+
+// Percantik sheet Neraca + grafik Aset/Liabilitas/Ekuitas.
+async function formatNeracaSheet() {
+  const sheetName = getNeracaSheetName();
+  const sheetId = await getSheetIdByName(sheetName);
+  if (sheetId == null) return;
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+
+  const list = await getNeraca();
+  const lastRow = Math.max(list.length + 1, 2);
+  let totalAset = 0;
+  let totalLiab = 0;
+  for (const x of list) {
+    if (x.tipe === 'Liabilitas') totalLiab += x.nilai;
+    else totalAset += x.nilai;
+  }
+  const ekuitas = totalAset - totalLiab;
+
+  // Blok ringkasan di kanan (F1:G4) sebagai sumber grafik.
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!F1:G4`,
+    valueInputOption: 'RAW',
+    requestBody: {
+      values: [
+        ['Ringkasan', ''],
+        ['Total Aset', Math.round(totalAset)],
+        ['Total Liabilitas', Math.round(totalLiab)],
+        ['Ekuitas', Math.round(ekuitas)]
+      ]
+    }
+  });
+
+  const font = getSheetFont();
+  const currency = { numberFormat: { type: 'CURRENCY', pattern: '"Rp"#,##0' } };
+  const existing = await getChartIds(sheets, sheetId);
+  const requests = [];
+
+  for (const id of existing) requests.push({ deleteEmbeddedObject: { objectId: id } });
+
+  // Font ke seluruh area
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 7 },
+      cell: { userEnteredFormat: { textFormat: { fontFamily: font } } },
+      fields: 'userEnteredFormat.textFormat.fontFamily'
+    }
+  });
+  // Header A1:D1
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 4 },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 0.18, green: 0.49, blue: 0.36 },
+          textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 }, fontFamily: font },
+          horizontalAlignment: 'CENTER'
+        }
+      },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment'
+    }
+  });
+  // Ringkasan F1 header style
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 5, endColumnIndex: 7 },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 0.85, green: 0.93, blue: 0.87 },
+          textFormat: { bold: true, fontFamily: font }
+        }
+      },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat'
+    }
+  });
+  // Currency: kolom C (nilai) & G (ringkasan)
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: 2, endColumnIndex: 3 },
+      cell: { userEnteredFormat: currency },
+      fields: 'userEnteredFormat.numberFormat'
+    }
+  });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: 4, startColumnIndex: 6, endColumnIndex: 7 },
+      cell: { userEnteredFormat: currency },
+      fields: 'userEnteredFormat.numberFormat'
+    }
+  });
+  // Freeze header + lebar kolom
+  requests.push({
+    updateSheetProperties: {
+      properties: { sheetId, gridProperties: { frozenRowCount: 1 } },
+      fields: 'gridProperties.frozenRowCount'
+    }
+  });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 }, properties: { pixelSize: 110 }, fields: 'pixelSize' } });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 2 }, properties: { pixelSize: 170 }, fields: 'pixelSize' } });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 2, endIndex: 3 }, properties: { pixelSize: 140 }, fields: 'pixelSize' } });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 5, endIndex: 7 }, properties: { pixelSize: 140 }, fields: 'pixelSize' } });
+
+  // Grafik kolom: Aset vs Liabilitas vs Ekuitas
+  requests.push({
+    addChart: {
+      chart: {
+        spec: {
+          title: 'Aset vs Liabilitas vs Ekuitas',
+          basicChart: {
+            chartType: 'COLUMN',
+            legendPosition: 'NO_LEGEND',
+            domains: [{ domain: { sourceRange: { sources: [{ sheetId, startRowIndex: 1, endRowIndex: 4, startColumnIndex: 5, endColumnIndex: 6 }] } } }],
+            series: [{ series: { sourceRange: { sources: [{ sheetId, startRowIndex: 1, endRowIndex: 4, startColumnIndex: 6, endColumnIndex: 7 }] } } }]
+          }
+        },
+        position: {
+          overlayPosition: {
+            anchorCell: { sheetId, rowIndex: 5, columnIndex: 5 },
+            offsetXPixels: 5, offsetYPixels: 5, widthPixels: 460, heightPixels: 300
+          }
+        }
+      }
+    }
+  });
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: config.spreadsheetId,
+    requestBody: { requests }
+  });
+
+  if (config.neracaImageUrl) {
+    try {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: config.spreadsheetId,
+        range: `'${sheetName}'!I1`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [[`=IMAGE("${config.neracaImageUrl}")`]] }
+      });
+    } catch (e) { logError('Gagal pasang gambar neraca.', e); }
+  }
 }
 
 // ----- Laporan bulanan (perbandingan, proyeksi, top, anomali) -----
@@ -3205,6 +3501,8 @@ bot.command('budget', async (ctx) => {
       );
     }
 
+    try { await refreshBudgetSheet(month, year); } catch (e) { logError('Gagal percantik budget.', e); }
+
     const lines = [`Budget bulan ${buildMonthLabel(month, year)} 💰`, ''];
     for (const kat of kats) {
       const budget = budgets[kat];
@@ -3829,12 +4127,13 @@ bot.command('neraca', async (ctx) => {
   try {
     if (!(await guardOwner(ctx))) return;
 
-    // Perbarui saldo tiap akun dulu.
+    // Perbarui saldo tiap akun dulu, lalu percantik + grafik.
     try {
       const entries = await getAllEntries();
       await refreshAccounts(entries);
+      await formatNeracaSheet();
     } catch (e) {
-      logError('Gagal hitung akun untuk neraca.', e);
+      logError('Gagal menyiapkan neraca.', e);
     }
 
     const list = await getNeraca();
@@ -4262,6 +4561,13 @@ async function handleKeywordText(ctx, text) {
       return true;
     }
     const canon = await setBudget(m[1].trim(), amount);
+    try {
+      const tz = getTimezone();
+      const now = new Date();
+      const mo = Number(now.toLocaleDateString('en-US', { timeZone: tz, month: 'numeric' }));
+      const yr = Number(now.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric' }));
+      await refreshBudgetSheet(mo, yr);
+    } catch (e) { logError('Gagal percantik budget.', e); }
     await ctx.reply(`Sip 👌 Budget ${canon} diset ${formatRupiah(amount)} / bulan. Nanti kuingatkan kalau mepet ya.`);
     return true;
   }
@@ -4383,6 +4689,7 @@ async function handleKeywordText(ctx, text) {
     if (/^hapus\s+/i.test(rest)) {
       const nama = rest.replace(/^hapus\s+/i, '').trim();
       const ok = await deleteNeracaItem(tipe, nama);
+      if (ok) { try { await formatNeracaSheet(); } catch (e) {} }
       await ctx.reply(ok ? `${tipe} "${nama}" dihapus dari neraca.` : `${tipe} "${nama}" tidak ditemukan.`);
       return true;
     }
@@ -4402,6 +4709,7 @@ async function handleKeywordText(ctx, text) {
       return true;
     }
     const canon = await addNeracaItem(tipe, m[1].trim(), nilai);
+    try { await formatNeracaSheet(); } catch (e) {}
     await ctx.reply(`Sip 👌 ${canon} "${m[1].trim()}" dicatat: ${formatRupiah(nilai)}. Lihat /neraca`);
     return true;
   }

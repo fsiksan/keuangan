@@ -314,9 +314,20 @@ Sheet **Analisa** dibuat & diperbarui otomatis setiap ada transaksi, berisi:
   pie pemasukan per Kategori, dan bar Pemasukan & Pengeluaran per Bulan
 * Judul & header tabel diberi warna agar lebih enak dilihat
 
-**Gambar ilustrasi (opsional):** isi `analisaImageUrl` di rekap.json dengan URL
-gambar publik untuk menampilkan ilustrasi di pojok sheet Analisa (pakai rumus
-`IMAGE()`). Kosongkan jika tidak ingin pakai gambar.
+**Gambar ilustrasi (opsional):** isi `analisaImageUrl` / `neracaImageUrl` /
+`budgetImageUrl` di rekap.json dengan URL gambar publik untuk menampilkan
+ilustrasi di pojok sheet (pakai rumus `IMAGE()`). Kosongkan jika tidak ingin gambar.
+
+**Font (opsional):** `sheetFont` mengatur font sheet Neraca & Budget
+(default `Roboto`).
+
+### Sheet Neraca & Budget (dipercantik + grafik)
+
+* **Neraca**: header berwarna, format Rupiah, dan **grafik kolom** Aset vs
+  Liabilitas vs Ekuitas (muncul saat `/neraca`).
+* **Budget**: kolom **Terpakai (bln ini)** & **Sisa** dihitung otomatis, plus
+  **grafik Budget vs Terpakai** per kategori (muncul saat `/budget` atau saat
+  set budget).
 
 > Balasan bot dibuat santai & ramah (mis. "Sip, dicatat ya 👌").
 
