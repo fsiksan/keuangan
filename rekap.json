@@ -11,6 +11,7 @@
   "targetSheetName": "Target",
   "hutangSheetName": "Hutang",
   "kategoriMapSheetName": "KategoriMap",
+  "analisaImageUrl": "",
   "credentialsFile": "./rekap-credentials.json",
   "timezone": "Asia/Jakarta",
   "reminderEnabled": true,

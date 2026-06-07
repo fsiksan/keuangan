@@ -281,6 +281,13 @@ Sheet **Analisa** dibuat & diperbarui otomatis setiap ada transaksi, berisi:
 * Ringkasan per bulan (pemasukan, pengeluaran, saldo)
 * **Grafik**: pie Pemasukan vs Pengeluaran, pie pengeluaran per Kategori/Toko/Pencatat,
   pie pemasukan per Kategori, dan bar Pemasukan & Pengeluaran per Bulan
+* Judul & header tabel diberi warna agar lebih enak dilihat
+
+**Gambar ilustrasi (opsional):** isi `analisaImageUrl` di rekap.json dengan URL
+gambar publik untuk menampilkan ilustrasi di pojok sheet Analisa (pakai rumus
+`IMAGE()`). Kosongkan jika tidak ingin pakai gambar.
+
+> Balasan bot dibuat santai & ramah (mis. "Sip, dicatat ya 👌").
 
 ## Induk Kategori (anti kategori ganda)
 

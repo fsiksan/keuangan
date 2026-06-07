@@ -262,6 +262,19 @@ function formatRupiah(n) {
   return 'Rp' + Number(n).toLocaleString('id-ID');
 }
 
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+const SAVE_PHRASES = [
+  'Sip, dicatat ya 👌',
+  'Oke, sudah masuk catatan ✅',
+  'Mantap, tercatat 📝',
+  'Beres! Dicatat ya 🙌',
+  'Noted 👍',
+  'Siap, sudah kucatat ✨'
+];
+
 function buildProgressBar(pct) {
   const clamped = Math.max(0, Math.min(100, Math.round(pct)));
   const filled = Math.round(clamped / 10);
@@ -932,6 +945,20 @@ async function updateAnalisaSheet() {
     requestBody: { values: rows },
   });
 
+  // Gambar ilustrasi opsional (di pojok kanan) bila diatur di config.
+  if (config.analisaImageUrl) {
+    try {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: config.spreadsheetId,
+        range: `'${sheetName}'!E1`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [[`=IMAGE("${config.analisaImageUrl}")`]] }
+      });
+    } catch (e) {
+      logError('Gagal memasang gambar ilustrasi analisa.', e);
+    }
+  }
+
   const currencyFmt = {
     userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '"Rp"#,##0' } }
   };
@@ -957,22 +984,49 @@ async function updateAnalisaSheet() {
     requests.push({ deleteEmbeddedObject: { objectId: id } });
   }
 
-  // Judul besar
+  // Judul besar — teks putih di atas latar hijau
   requests.push({
     repeatCell: {
       range: rangeCell(0, 1, 0, 4),
-      cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 14 } } },
-      fields: 'userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.fontSize'
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 0.18, green: 0.49, blue: 0.36 },
+          textFormat: {
+            bold: true,
+            fontSize: 15,
+            foregroundColor: { red: 1, green: 1, blue: 1 }
+          }
+        }
+      },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat'
     }
   });
 
-  // Tebalkan baris header bagian/tabel
+  // Baris "Diperbarui" dibuat miring & abu-abu lembut
+  requests.push({
+    repeatCell: {
+      range: rangeCell(1, 2, 0, 4),
+      cell: {
+        userEnteredFormat: {
+          textFormat: { italic: true, foregroundColor: { red: 0.45, green: 0.45, blue: 0.45 } }
+        }
+      },
+      fields: 'userEnteredFormat.textFormat.italic,userEnteredFormat.textFormat.foregroundColor'
+    }
+  });
+
+  // Header bagian/tabel: tebal + latar hijau muda
   for (const r of boldRows) {
     requests.push({
       repeatCell: {
         range: rangeCell(r, r + 1, 0, 4),
-        cell: { userEnteredFormat: { textFormat: { bold: true } } },
-        fields: 'userEnteredFormat.textFormat.bold'
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 0.85, green: 0.93, blue: 0.87 },
+            textFormat: { bold: true }
+          }
+        },
+        fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold'
       }
     });
   }
@@ -2872,7 +2926,7 @@ bot.command('edit', async (ctx) => {
     await formatSheetLayout();
     try { await updateAnalisaSheet(); } catch (e) { logError('Gagal update analisa.', e); }
 
-    return ctx.reply(`Transaksi terakhir diperbarui ✅\n${m[1].toLowerCase()} → ${result.value}`);
+    return ctx.reply(`Sip, sudah diupdate 👌\n${m[1].toLowerCase()} → ${result.value}`);
   } catch (err) {
     logError('Gagal mengedit transaksi.', err);
     return ctx.reply('Gagal mengedit transaksi.');
@@ -3688,7 +3742,7 @@ bot.on(['photo', 'document'], async (ctx) => {
       return ctx.reply('Tidak ada gambar yang bisa dibaca.');
     }
 
-    await ctx.reply('Membaca struk... 🧾');
+    await ctx.reply('Sebentar ya, lagi baca strukmu 🧾...');
 
     const link = await ctx.telegram.getFileLink(fileId);
     const res = await fetch(link.href);
@@ -3737,7 +3791,7 @@ bot.on(['photo', 'document'], async (ctx) => {
 
     return ctx.reply(
       buildReceiptSummary(pending) +
-        '\n\nGanti kategori bila perlu, lalu tekan Simpan:',
+        '\n\nKategorinya pas? Kalau perlu ganti dulu, terus tekan Simpan ya 👇',
       { reply_markup: receiptKeyboard(id, pending.kategori) }
     );
   } catch (err) {
@@ -3812,7 +3866,7 @@ async function processTransactionText(ctx, text) {
 
   let reply = '';
   if (successLines.length > 0) {
-    reply += 'Tersimpan ✅\n' + successLines.join('\n');
+    reply += pick(SAVE_PHRASES) + '\n' + successLines.join('\n');
   }
 
   // Peringatan budget
@@ -3830,14 +3884,14 @@ async function processTransactionText(ctx, text) {
   if (failedLines.length > 0) {
     if (reply) reply += '\n\n';
     reply +=
-      'Baris gagal dibaca:\n' +
+      'Hmm, baris ini belum kebaca 🤔:\n' +
       failedLines.map((line) => `- ${line}`).join('\n');
   }
 
   if (!reply) {
     reply =
-      'Format tidak terbaca.\n' +
-      'Contoh:\n' +
+      'Waduh, formatnya belum kebaca 🙏\n' +
+      'Coba kayak gini:\n' +
       '- keluar makan 100000\n' +
       '- keluar makan 100000 di warung agam\n' +
       '- masuk gaji 5jt';
@@ -3913,7 +3967,7 @@ async function handleKeywordText(ctx, text) {
       return true;
     }
     const canon = await setBudget(m[1].trim(), amount);
-    await ctx.reply(`Budget ${canon} diatur: ${formatRupiah(amount)} / bulan.`);
+    await ctx.reply(`Sip 👌 Budget ${canon} diset ${formatRupiah(amount)} / bulan. Nanti kuingatkan kalau mepet ya.`);
     return true;
   }
 
@@ -3938,8 +3992,8 @@ async function handleKeywordText(ctx, text) {
     }
     const t = await setTarget(m[1].trim(), amount);
     await ctx.reply(
-      `Target "${t.nama}" diatur: ${formatRupiah(amount)}.\n` +
-      `Tabung dengan: nabung ${t.nama} <nominal>`
+      `Mantap, target "${t.nama}" diset ${formatRupiah(amount)} 🎯\n` +
+      `Mulai nabung: nabung ${t.nama} <nominal>`
     );
     return true;
   }
@@ -3963,9 +4017,13 @@ async function handleKeywordText(ctx, text) {
       return true;
     }
     const pct = t.target > 0 ? Math.min(100, Math.round((t.terkumpul / t.target) * 100)) : 0;
+    const semangat = pct >= 100
+      ? '\n🎉 Targetnya tercapai! Keren banget 🥳'
+      : (pct >= 50 ? '\nUdah lewat separuh, semangat! 💪' : '\nMantap, nabung terus ya 💪');
     await ctx.reply(
-      `Nabung ${formatRupiah(amount)} ke "${t.nama}".\n` +
-      `Progress: ${formatRupiah(t.terkumpul)} / ${formatRupiah(t.target)} (${pct}%)`
+      `Sip, nabung ${formatRupiah(amount)} ke "${t.nama}" 👌\n` +
+      `Progress: ${formatRupiah(t.terkumpul)} / ${formatRupiah(t.target)} (${pct}%)\n` +
+      buildProgressBar(pct) + semangat
     );
     return true;
   }
@@ -4139,9 +4197,9 @@ bot.on('callback_query', async (ctx) => {
         const tokoLabel = deleted.toko ? ` | ${deleted.toko}` : '';
         try {
           await ctx.editMessageText(
-            'Transaksi dihapus 🗑️\n' +
+            'Oke, sudah kuhapus ya 🗑️\n' +
             `${deleted.tanggal} | ${itemLabel}${deleted.kategori}${tokoLabel} | ${nilai}\n\n` +
-            'Salah hapus? Ketik /batal untuk mengembalikan.'
+            'Eh salah? Ketik /batal buat balikin lagi 🙂'
           );
         } catch (e) {}
         return;
@@ -4179,7 +4237,7 @@ bot.on('callback_query', async (ctx) => {
       await ctx.answerCbQuery(`Kategori: ${cat}`);
       try {
         await ctx.editMessageText(
-          buildReceiptSummary(pending) + '\n\nGanti kategori bila perlu, lalu tekan Simpan:',
+          buildReceiptSummary(pending) + '\n\nKategorinya pas? Kalau perlu ganti dulu, terus tekan Simpan ya 👇',
           { reply_markup: receiptKeyboard(id, cat) }
         );
       } catch (e) {}
@@ -4215,7 +4273,7 @@ bot.on('callback_query', async (ctx) => {
       } catch (e) {}
 
       try {
-        await ctx.editMessageText(buildReceiptSummary(pending) + '\n\nTersimpan ✅' + alert);
+        await ctx.editMessageText(buildReceiptSummary(pending) + '\n\nSip, struk dicatat ya 👌' + alert);
       } catch (e) {}
       return;
     }
