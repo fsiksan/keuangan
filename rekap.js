@@ -34,12 +34,15 @@ const anthropic = anthropicApiKey
 // Menyimpan hasil baca struk sementara (menunggu konfirmasi tombol).
 const pendingReceipts = new Map();
 
+// Baris transaksi terakhir yang dihapus (untuk /batal).
+let lastDeletedRow = null;
+
 // Keyboard pintasan yang muncul di bawah kolom ketik.
 const mainKeyboard = Markup.keyboard([
-  ['/saldo', '/hari', '/minggu', '/bulan'],
+  ['/ringkasan', '/saldo', '/hari', '/minggu', '/bulan'],
   ['/laporan', '/analisa', '/kategori'],
   ['/budget', '/target', '/langganan', '/hutang'],
-  ['/cari', '/export', '/edit', '/hapus'],
+  ['/cari', '/export', '/edit', '/hapus', '/batal'],
   ['/help']
 ]).resize();
 
@@ -1742,6 +1745,7 @@ async function deleteLastTransaction() {
     }
   });
   return {
+    raw: last,
     tanggal: last[0] || '',
     item: last[1] || '',
     kategori: last[2] || '',
@@ -2335,6 +2339,7 @@ bot.command('help', async (ctx) => {
     'lunas <nama>                  (tandai lunas)\n' +
     '\n' +
     'Perintah:\n' +
+    '/ringkasan - dashboard keuangan\n' +
     '/saldo - saldo total & bulan ini\n' +
     '/hari [DD MM YYYY] - rekap harian\n' +
     '/minggu - rekap 7 hari terakhir\n' +
@@ -2349,9 +2354,10 @@ bot.command('help', async (ctx) => {
     '   /langganan jalan | /langganan hapus <nama>\n' +
     '/hutang - catatan hutang & piutang\n' +
     '/cari <kata> - cari transaksi\n' +
-    '/export - unduh data CSV\n' +
+    '/export [MM YYYY] - unduh data CSV (semua / per bulan)\n' +
     '/edit - edit transaksi terakhir (item/kategori/toko/nominal/catatan)\n' +
-    '/hapus - hapus transaksi terakhir'
+    '/hapus - hapus transaksi terakhir\n' +
+    '/batal - kembalikan transaksi yang baru dihapus'
   );
 });
 
@@ -3146,6 +3152,20 @@ bot.command('export', async (ctx) => {
   try {
     if (!(await guardOwner(ctx))) return;
 
+    const parts = (ctx.message.text || '').trim().split(/\s+/).filter(Boolean);
+    let month = null;
+    let year = null;
+    if (parts.length >= 3) {
+      const im = Number(parts[1]);
+      const iy = Number(parts[2]);
+      if (Number.isInteger(im) && im >= 1 && im <= 12 && Number.isInteger(iy) && iy >= 2000) {
+        month = im;
+        year = iy;
+      } else {
+        return ctx.reply('Format: /export atau /export MM YYYY\nContoh: /export 6 2026');
+      }
+    }
+
     const client = await auth.getClient();
     const sheets = google.sheets({ version: 'v4', auth: client });
     const res = await sheets.spreadsheets.values.get({
@@ -3157,15 +3177,30 @@ bot.command('export', async (ctx) => {
       return ctx.reply('Belum ada data untuk diekspor.');
     }
 
+    let outRows = rows;
+    if (month && year) {
+      const header = rows[0];
+      const filtered = rows.slice(1).filter((r) => {
+        const d = parseDateParts(r[0] || '');
+        return d && d.month === month && d.year === year;
+      });
+      if (filtered.length === 0) {
+        return ctx.reply(`Tidak ada transaksi untuk ${buildMonthLabel(month, year)}.`);
+      }
+      outRows = [header, ...filtered];
+    }
+
     const esc = (v) => {
       const s = String(v == null ? '' : v);
       return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
-    const csv = rows.map((r) => r.map(esc).join(',')).join('\n');
+    const csv = outRows.map((r) => r.map(esc).join(',')).join('\n');
     const buffer = Buffer.from('﻿' + csv, 'utf8');
 
     const tz = getTimezone();
-    const stamp = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+    const stamp = month && year
+      ? `${year}-${String(month).padStart(2, '0')}`
+      : new Date().toLocaleDateString('en-CA', { timeZone: tz });
 
     return ctx.replyWithDocument({
       source: buffer,
@@ -3174,6 +3209,127 @@ bot.command('export', async (ctx) => {
   } catch (err) {
     logError('Gagal ekspor data.', err);
     return ctx.reply('Gagal ekspor data.');
+  }
+});
+
+bot.command('batal', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    if (!lastDeletedRow) {
+      return ctx.reply('Tidak ada transaksi yang baru dihapus untuk dikembalikan.');
+    }
+
+    await ensureHeader();
+    await appendRow(lastDeletedRow);
+    await formatSheetLayout();
+    try { await updateAnalisaSheet(); } catch (e) { logError('Gagal update analisa.', e); }
+
+    const r = lastDeletedRow;
+    lastDeletedRow = null;
+    const nilai = parseRupiahTextToNumber(r[5] || '') > 0
+      ? `-${formatRupiah(parseRupiahTextToNumber(r[5] || ''))}`
+      : `+${formatRupiah(parseRupiahTextToNumber(r[4] || ''))}`;
+    const itemLabel = r[1] ? `${r[1]} | ` : '';
+    return ctx.reply(
+      'Transaksi dikembalikan ✅\n' +
+      `${r[0] || ''} | ${itemLabel}${r[2] || ''} | ${nilai}`
+    );
+  } catch (err) {
+    logError('Gagal mengembalikan transaksi.', err);
+    return ctx.reply('Gagal mengembalikan transaksi.');
+  }
+});
+
+bot.command('ringkasan', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    const tz = getTimezone();
+    const now = new Date();
+    const month = Number(now.toLocaleDateString('en-US', { timeZone: tz, month: 'numeric' }));
+    const year = Number(now.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric' }));
+
+    const entries = await getAllEntries();
+    let allInc = 0;
+    let allExp = 0;
+    let mInc = 0;
+    let mExp = 0;
+    const perKat = {};
+    for (const e of entries) {
+      allInc += e.pemasukan;
+      allExp += e.pengeluaran;
+      if (e.parsedDate.month === month && e.parsedDate.year === year) {
+        mInc += e.pemasukan;
+        mExp += e.pengeluaran;
+        if (e.pengeluaran > 0) {
+          const k = normalizeCategory(e.kategori, 'pengeluaran');
+          perKat[k] = (perKat[k] || 0) + e.pengeluaran;
+        }
+      }
+    }
+
+    const lines = [`📋 Ringkasan — ${buildMonthLabel(month, year)}`, ''];
+    lines.push(`Saldo total: ${formatRupiah(allInc - allExp)}`);
+    lines.push(`Bulan ini: masuk ${formatRupiah(mInc)} | keluar ${formatRupiah(mExp)}`);
+    lines.push(`Selisih bulan ini: ${formatRupiah(mInc - mExp)}`);
+
+    const top = Object.entries(perKat).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    if (top.length > 0) {
+      lines.push('');
+      lines.push('Top pengeluaran:');
+      top.forEach(([k, v], i) => lines.push(`${i + 1}. ${k}: ${formatRupiah(v)}`));
+    }
+
+    // Status budget
+    try {
+      const budgets = await getBudgets();
+      const warn = [];
+      for (const kat of Object.keys(budgets)) {
+        const spent = await getMonthlyCategoryTotal(kat, month, year);
+        const b = budgets[kat];
+        if (b > 0 && spent / b >= 0.8) {
+          warn.push(`- ${kat}: ${formatRupiah(spent)}/${formatRupiah(b)} (${Math.round(spent / b * 100)}%)`);
+        }
+      }
+      if (warn.length > 0) {
+        lines.push('');
+        lines.push('⚠️ Budget perlu perhatian:');
+        lines.push(warn.join('\n'));
+      }
+    } catch (e) { logError('Ringkasan: budget.', e); }
+
+    // Target
+    try {
+      const targets = await getTargets();
+      if (targets.length > 0) {
+        lines.push('');
+        lines.push('🎯 Target:');
+        for (const t of targets.slice(0, 5)) {
+          const pct = t.target > 0 ? Math.min(100, Math.round(t.terkumpul / t.target * 100)) : 0;
+          lines.push(`- ${t.nama}: ${pct}% (${formatRupiah(t.terkumpul)}/${formatRupiah(t.target)})`);
+        }
+      }
+    } catch (e) { logError('Ringkasan: target.', e); }
+
+    // Hutang/piutang
+    try {
+      const hutang = await getHutang();
+      if (hutang.length > 0) {
+        let th = 0;
+        let tp = 0;
+        for (const h of hutang) {
+          if (/piutang/i.test(h.jenis)) tp += h.nominal; else th += h.nominal;
+        }
+        lines.push('');
+        lines.push(`🧾 Hutang ${formatRupiah(th)} | Piutang ${formatRupiah(tp)} | Bersih ${formatRupiah(tp - th)}`);
+      }
+    } catch (e) { logError('Ringkasan: hutang.', e); }
+
+    return ctx.reply(lines.join('\n'));
+  } catch (err) {
+    logError('Gagal membuat ringkasan.', err);
+    return ctx.reply('Gagal membuat ringkasan.');
   }
 });
 
@@ -3581,6 +3737,7 @@ bot.on('callback_query', async (ctx) => {
           try { await ctx.editMessageText('Tidak ada transaksi untuk dihapus.'); } catch (e) {}
           return;
         }
+        lastDeletedRow = deleted.raw || null;
         await formatSheetLayout();
         try { await updateAnalisaSheet(); } catch (e) { logError('Gagal update analisa.', e); }
         const nilai = deleted.pengeluaran > 0
@@ -3591,7 +3748,8 @@ bot.on('callback_query', async (ctx) => {
         try {
           await ctx.editMessageText(
             'Transaksi dihapus 🗑️\n' +
-            `${deleted.tanggal} | ${itemLabel}${deleted.kategori}${tokoLabel} | ${nilai}`
+            `${deleted.tanggal} | ${itemLabel}${deleted.kategori}${tokoLabel} | ${nilai}\n\n` +
+            'Salah hapus? Ketik /batal untuk mengembalikan.'
           );
         } catch (e) {}
         return;
@@ -3802,6 +3960,7 @@ async function registerBotCommands() {
       { command: 'start', description: 'Mulai & petunjuk penggunaan' },
       { command: 'help', description: 'Panduan lengkap' },
       { command: 'menu', description: 'Tampilkan tombol pintasan' },
+      { command: 'ringkasan', description: 'Ringkasan keuangan (dashboard)' },
       { command: 'saldo', description: 'Saldo total & bulan ini' },
       { command: 'hari', description: 'Rekap hari ini' },
       { command: 'minggu', description: 'Rekap 7 hari terakhir' },
@@ -3816,7 +3975,8 @@ async function registerBotCommands() {
       { command: 'cari', description: 'Cari transaksi' },
       { command: 'export', description: 'Ekspor data ke CSV' },
       { command: 'edit', description: 'Edit transaksi terakhir' },
-      { command: 'hapus', description: 'Hapus transaksi terakhir' }
+      { command: 'hapus', description: 'Hapus transaksi terakhir' },
+      { command: 'batal', description: 'Kembalikan transaksi yang dihapus' }
     ]);
     logInfo('Menu perintah Telegram terpasang.');
   } catch (e) {

@@ -137,6 +137,7 @@ node rekap.js
 | /start | Petunjuk pengisian & penggunaan + tombol pintasan |
 | /help | Bantuan lengkap |
 | /menu | Tampilkan tombol pintasan |
+| /ringkasan | Dashboard: saldo, top kategori, status budget/target, hutang |
 | /saldo | Saldo total & ringkasan bulan ini |
 | /hari [DD MM YYYY] | Rekap harian |
 | /minggu | Rekap 7 hari terakhir |
@@ -149,9 +150,10 @@ node rekap.js
 | /langganan | Kelola tagihan rutin (tambah/hapus/jalan) |
 | /hutang | Catatan hutang & piutang |
 | /cari <kata> | Cari transaksi (kategori/toko/catatan/pencatat) |
-| /export | Unduh seluruh data sebagai file CSV |
-| /edit | Edit transaksi terakhir (kategori/toko/nominal/catatan) |
+| /export [MM YYYY] | Unduh data CSV (semua atau per bulan) |
+| /edit | Edit transaksi terakhir (item/kategori/toko/nominal/catatan) |
 | /hapus | Hapus transaksi terakhir (dengan konfirmasi) |
+| /batal | Kembalikan transaksi yang baru saja dihapus |
 
 ### Hutang & Piutang
 
