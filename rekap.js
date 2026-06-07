@@ -9,15 +9,38 @@ execSync(
 
 const { Telegraf, Markup } = require('telegraf');
 const { google } = require('googleapis');
+const { AsyncLocalStorage } = require('async_hooks');
 const Anthropic = require('@anthropic-ai/sdk');
 const config = require('./rekap.json');
+
+// ---- Multi-tenant context ----
+// Tiap update Telegram dijalankan dalam konteks tenant (spreadsheet milik user).
+const tenantStore = new AsyncLocalStorage();
+
+function isMultiTenant() {
+  return config.multiTenant === true;
+}
+
+function masterId() {
+  return config.masterSpreadsheetId || config.spreadsheetId;
+}
+
+// Spreadsheet ID aktif: ikut konteks tenant bila ada, jika tidak pakai config.
+function ssId() {
+  const t = tenantStore.getStore();
+  return (t && t.spreadsheetId) || config.spreadsheetId;
+}
 
 if (!config.botToken) {
   throw new Error('botToken di rekap.json belum diisi');
 }
 
-if (!config.spreadsheetId) {
+if (!isMultiTenant() && !config.spreadsheetId) {
   throw new Error('spreadsheetId di rekap.json belum diisi');
+}
+
+if (isMultiTenant() && !masterId()) {
+  throw new Error('masterSpreadsheetId di rekap.json belum diisi (mode multi-tenant)');
 }
 
 if (!config.ownerUserId) {
@@ -97,7 +120,8 @@ const auth = new google.auth.GoogleAuth({
 });
 
 function getSheetName() {
-  return config.sheetName || 'Sheet1';
+  const t = tenantStore.getStore();
+  return (t && t.sheetName) || config.sheetName || 'Sheet1';
 }
 
 function getAnalisaSheetName() {
@@ -173,9 +197,11 @@ function normalizeCategory(raw, type) {
   const s = String(raw || '').toLowerCase().trim();
   if (!s) return 'Lainnya';
 
-  // Pemetaan custom dari user diprioritaskan.
-  for (const [keyword, canonical] of customCategoryRules) {
-    if (matchKeyword(s, keyword)) return canonical;
+  // Pemetaan custom dari user diprioritaskan (mode pribadi/single-tenant).
+  if (!isMultiTenant()) {
+    for (const [keyword, canonical] of customCategoryRules) {
+      if (matchKeyword(s, keyword)) return canonical;
+    }
   }
 
   const rules = type === 'pemasukan' ? INCOME_CATEGORY_RULES : EXPENSE_CATEGORY_RULES;
@@ -302,7 +328,7 @@ async function getAllEntries() {
   const sheetName = getSheetName();
 
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A:I`,
   });
 
@@ -381,6 +407,8 @@ async function getDailySummary(day, month, year) {
 }
 
 async function guardOwner(ctx) {
+  // Mode multi-tenant: akses sudah diverifikasi oleh middleware tenant.
+  if (isMultiTenant()) return true;
   if (!isOwner(ctx)) {
     logInfo(`Akses ditolak untuk userId=${ctx.from?.id || 'unknown'}`);
     await ctx.reply('Bot ini khusus pemilik.');
@@ -395,7 +423,7 @@ async function appendRow(values) {
   const sheetName = getSheetName();
 
   await sheets.spreadsheets.values.append({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A:I`,
     valueInputOption: 'USER_ENTERED',
     requestBody: {
@@ -412,7 +440,7 @@ async function ensureHeader() {
   const sheetName = getSheetName();
 
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A1:I2`,
   });
 
@@ -431,7 +459,7 @@ async function ensureHeader() {
 
   if (needsHeader) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A1:I1`,
       valueInputOption: 'RAW',
       requestBody: {
@@ -457,7 +485,7 @@ async function formatSheetLayout() {
   const sheetName = getSheetName();
 
   const meta = await sheets.spreadsheets.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
   });
 
   const targetSheet = meta.data.sheets.find(
@@ -471,7 +499,7 @@ async function formatSheetLayout() {
   const sheetId = targetSheet.properties.sheetId;
 
   const valueRes = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A:I`,
   });
 
@@ -479,7 +507,7 @@ async function formatSheetLayout() {
   const lastRow = Math.max(values.length, 1);
 
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: {
       requests: [
         {
@@ -766,7 +794,7 @@ async function ensureSheetExists(sheetName) {
   const sheets = google.sheets({ version: 'v4', auth: client });
 
   const meta = await sheets.spreadsheets.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
   });
 
   const existing = meta.data.sheets.find(
@@ -778,7 +806,7 @@ async function ensureSheetExists(sheetName) {
   }
 
   const res = await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: {
       requests: [
         {
@@ -944,7 +972,7 @@ async function updateAnalisaSheet() {
   let existingChartIds = [];
   try {
     const meta = await sheets.spreadsheets.get({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       fields: 'sheets(properties/sheetId,charts/chartId)'
     });
     const target = (meta.data.sheets || []).find(
@@ -956,12 +984,12 @@ async function updateAnalisaSheet() {
   }
 
   await sheets.spreadsheets.values.clear({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A1:Z1000`,
   });
 
   await sheets.spreadsheets.values.update({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A1`,
     valueInputOption: 'RAW',
     requestBody: { values: rows },
@@ -971,7 +999,7 @@ async function updateAnalisaSheet() {
   if (config.analisaImageUrl) {
     try {
       await sheets.spreadsheets.values.update({
-        spreadsheetId: config.spreadsheetId,
+        spreadsheetId: ssId(),
         range: `'${sheetName}'!E1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [[`=IMAGE("${config.analisaImageUrl}")`]] }
@@ -1268,7 +1296,7 @@ async function updateAnalisaSheet() {
   }
 
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: { requests },
   });
 
@@ -1502,7 +1530,7 @@ async function getSheetIdByName(sheetName) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const meta = await sheets.spreadsheets.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     fields: 'sheets(properties(sheetId,title))'
   });
   const t = (meta.data.sheets || []).find((s) => s.properties.title === sheetName);
@@ -1515,14 +1543,14 @@ async function ensureSheetWithHeader(sheetName, header) {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const colEnd = String.fromCharCode(64 + header.length);
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A1:${colEnd}1`
   });
   const cur = (res.data.values && res.data.values[0]) || [];
   const needs = header.some((h, i) => cur[i] !== h);
   if (needs) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A1:${colEnd}1`,
       valueInputOption: 'RAW',
       requestBody: { values: [header] }
@@ -1545,7 +1573,7 @@ async function loadCustomCategoryRules() {
     const client = await auth.getClient();
     const sheets = google.sheets({ version: 'v4', auth: client });
     const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A2:B`
     });
     const rows = res.data.values || [];
@@ -1566,7 +1594,7 @@ async function addCategoryMap(keyword, kategori) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:B`
   });
   const rows = res.data.values || [];
@@ -1576,14 +1604,14 @@ async function addCategoryMap(keyword, kategori) {
   }
   if (found >= 0) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A${found + 2}:B${found + 2}`,
       valueInputOption: 'RAW',
       requestBody: { values: [[kw, kat]] }
     });
   } else {
     await sheets.spreadsheets.values.append({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A:B`,
       valueInputOption: 'RAW',
       requestBody: { values: [[kw, kat]] }
@@ -1599,7 +1627,7 @@ async function removeCategoryMap(keyword) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:B`
   });
   const rows = res.data.values || [];
@@ -1610,7 +1638,7 @@ async function removeCategoryMap(keyword) {
   if (found < 0) return false;
   const sheetId = await getSheetIdByName(sheetName);
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: {
       requests: [{
         deleteDimension: {
@@ -1669,7 +1697,7 @@ async function getBudgets() {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:B`
   });
   const rows = res.data.values || [];
@@ -1689,7 +1717,7 @@ async function setBudget(kategori, amount) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:B`
   });
   const rows = res.data.values || [];
@@ -1703,14 +1731,14 @@ async function setBudget(kategori, amount) {
   if (foundRow >= 0) {
     const rowNum = foundRow + 2;
     await sheets.spreadsheets.values.update({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A${rowNum}:B${rowNum}`,
       valueInputOption: 'RAW',
       requestBody: { values: [[canon, amount]] }
     });
   } else {
     await sheets.spreadsheets.values.append({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A:B`,
       valueInputOption: 'RAW',
       requestBody: { values: [[canon, amount]] }
@@ -1729,7 +1757,7 @@ async function refreshBudgetSheet(month, year) {
   const sheets = google.sheets({ version: 'v4', auth: client });
 
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:B`
   });
   const rows = res.data.values || [];
@@ -1755,13 +1783,13 @@ async function refreshBudgetSheet(month, year) {
 
   // Header C1:D1 + nilai C2:D
   await sheets.spreadsheets.values.update({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!C1:D1`,
     valueInputOption: 'RAW',
     requestBody: { values: [['Terpakai (bln ini)', 'Sisa']] }
   });
   await sheets.spreadsheets.values.update({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!C2:D${dataRows.length + 1}`,
     valueInputOption: 'RAW',
     requestBody: { values: cd }
@@ -1839,14 +1867,14 @@ async function refreshBudgetSheet(month, year) {
   });
 
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: { requests }
   });
 
   if (config.budgetImageUrl) {
     try {
       await sheets.spreadsheets.values.update({
-        spreadsheetId: config.spreadsheetId,
+        spreadsheetId: ssId(),
         range: `'${sheetName}'!I1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [[`=IMAGE("${config.budgetImageUrl}")`]] }
@@ -1861,7 +1889,7 @@ async function deleteBudget(kategori) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:B`
   });
   const rows = res.data.values || [];
@@ -1875,7 +1903,7 @@ async function deleteBudget(kategori) {
   if (foundRow < 0) return false;
   const sheetId = await getSheetIdByName(sheetName);
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: {
       requests: [{
         deleteDimension: {
@@ -1922,7 +1950,7 @@ async function getTargets() {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:C`
   });
   const rows = res.data.values || [];
@@ -1948,7 +1976,7 @@ async function setTarget(nama, target) {
   const found = list.find((t) => t.nama.toLowerCase() === nama.toLowerCase());
   if (found) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A${found.rowNum}:C${found.rowNum}`,
       valueInputOption: 'RAW',
       requestBody: { values: [[found.nama, target, found.terkumpul]] }
@@ -1956,7 +1984,7 @@ async function setTarget(nama, target) {
     return { ...found, target };
   }
   await sheets.spreadsheets.values.append({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A:C`,
     valueInputOption: 'RAW',
     requestBody: { values: [[nama, target, 0]] }
@@ -1973,7 +2001,7 @@ async function addNabung(nama, amount) {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const terkumpul = found.terkumpul + amount;
   await sheets.spreadsheets.values.update({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A${found.rowNum}:C${found.rowNum}`,
     valueInputOption: 'RAW',
     requestBody: { values: [[found.nama, found.target, terkumpul]] }
@@ -1990,7 +2018,7 @@ async function deleteTarget(nama) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: {
       requests: [{
         deleteDimension: {
@@ -2014,7 +2042,7 @@ async function getLangganan() {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:G`
   });
   const rows = res.data.values || [];
@@ -2045,7 +2073,7 @@ async function addLangganan(obj) {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const jenis = obj.jenis === 'pemasukan' ? 'pemasukan' : 'pengeluaran';
   await sheets.spreadsheets.values.append({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A:G`,
     valueInputOption: 'RAW',
     requestBody: {
@@ -2071,7 +2099,7 @@ async function deleteLangganan(nama) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: {
       requests: [{
         deleteDimension: {
@@ -2139,7 +2167,7 @@ async function deleteLastTransaction() {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A:I`
   });
   const rows = res.data.values || [];
@@ -2148,7 +2176,7 @@ async function deleteLastTransaction() {
   const last = rows[lastIndex];
   const sheetId = await getSheetIdByName(sheetName);
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: {
       requests: [{
         deleteDimension: {
@@ -2174,7 +2202,7 @@ async function editLastTransaction(field, rawValue) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A:I`
   });
   const rows = res.data.values || [];
@@ -2213,7 +2241,7 @@ async function editLastTransaction(field, rawValue) {
   }
 
   await sheets.spreadsheets.values.update({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!${col}${rowNum}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [[value]] }
@@ -2230,7 +2258,7 @@ async function getHutang() {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:E`
   });
   const rows = res.data.values || [];
@@ -2257,7 +2285,7 @@ async function addHutang(jenis, nama, nominal, catatan) {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const tanggal = new Date().toLocaleDateString('id-ID', { timeZone: getTimezone() });
   await sheets.spreadsheets.values.append({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A:E`,
     valueInputOption: 'RAW',
     requestBody: { values: [[nama, jenis, nominal, catatan || '', tanggal]] }
@@ -2281,7 +2309,7 @@ async function deleteHutangByName(nama) {
       }
     }));
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: { requests }
   });
   return matched.length;
@@ -2303,7 +2331,7 @@ async function getNeraca() {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:D`
   });
   const rows = res.data.values || [];
@@ -2337,7 +2365,7 @@ async function refreshAccounts(entries) {
   if (!('Kas' in net)) net['Kas'] = 0;
 
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:D`
   });
   const rows = res.data.values || [];
@@ -2356,12 +2384,12 @@ async function refreshAccounts(entries) {
   const newData = [...autoRows, ...manualRows];
 
   await sheets.spreadsheets.values.clear({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:D1000`
   });
   if (newData.length > 0) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A2`,
       valueInputOption: 'RAW',
       requestBody: { values: newData }
@@ -2376,7 +2404,7 @@ async function addNeracaItem(tipe, nama, nilai) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A2:D`
   });
   const rows = res.data.values || [];
@@ -2393,14 +2421,14 @@ async function addNeracaItem(tipe, nama, nilai) {
   }
   if (foundRow >= 0) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A${foundRow + 2}:D${foundRow + 2}`,
       valueInputOption: 'RAW',
       requestBody: { values: [[canonTipe, nama, Math.round(nilai), 'manual']] }
     });
   } else {
     await sheets.spreadsheets.values.append({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${sheetName}'!A:D`,
       valueInputOption: 'RAW',
       requestBody: { values: [[canonTipe, nama, Math.round(nilai), 'manual']] }
@@ -2421,7 +2449,7 @@ async function deleteNeracaItem(tipe, nama) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: {
       requests: [{
         deleteDimension: {
@@ -2436,7 +2464,7 @@ async function deleteNeracaItem(tipe, nama) {
 async function getChartIds(sheets, sheetId) {
   try {
     const meta = await sheets.spreadsheets.get({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       fields: 'sheets(properties/sheetId,charts/chartId)'
     });
     const t = (meta.data.sheets || []).find((s) => s.properties.sheetId === sheetId);
@@ -2471,7 +2499,7 @@ async function formatNeracaSheet() {
 
   // Blok ringkasan di kanan (F1:G4) sebagai sumber grafik.
   await sheets.spreadsheets.values.update({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!F1:G4`,
     valueInputOption: 'RAW',
     requestBody: {
@@ -2577,14 +2605,14 @@ async function formatNeracaSheet() {
   });
 
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     requestBody: { requests }
   });
 
   if (config.neracaImageUrl) {
     try {
       await sheets.spreadsheets.values.update({
-        spreadsheetId: config.spreadsheetId,
+        spreadsheetId: ssId(),
         range: `'${sheetName}'!I1`,
         valueInputOption: 'USER_ENTERED',
         requestBody: { values: [[`=IMAGE("${config.neracaImageUrl}")`]] }
@@ -2981,6 +3009,316 @@ async function parseTransaction(text) {
     amountText
   };
 }
+
+// ===========================================================================
+// MULTI-TENANT: pemetaan user -> spreadsheet, masa aktif, & perintah admin
+// ===========================================================================
+
+const DEFAULT_GROUP_LINK = 'https://t.me/+D5IRzFMN2mM5NzM1';
+const PELANGGAN_HEADER = [
+  'Telegram ID', 'Nama', 'Email', 'Spreadsheet ID', 'Sheet Name', 'Paket', 'Aktif Sampai'
+];
+const _tenantCache = new Map(); // userId -> { tenant, ts }
+const TENANT_TTL_MS = 60 * 1000;
+
+function masterSheetName() {
+  return config.pelangganSheetName || 'Pelanggan';
+}
+
+function getAdminIds() {
+  const ids = [];
+  if (config.ownerUserId != null) ids.push(String(config.ownerUserId).trim());
+  const a = config.adminUserIds;
+  if (Array.isArray(a)) for (const x of a) ids.push(String(x).trim());
+  else if (typeof a === 'string') for (const x of a.split(',')) { const t = x.trim(); if (t) ids.push(t); }
+  return Array.from(new Set(ids.filter(Boolean)));
+}
+
+function isAdmin(ctx) {
+  return getAdminIds().includes(String(ctx.from?.id || '').trim());
+}
+
+function groupLink() {
+  return config.groupLink || DEFAULT_GROUP_LINK;
+}
+
+async function ensureMasterPelanggan() {
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const name = masterSheetName();
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: masterId(),
+    fields: 'sheets(properties(title))'
+  });
+  const exists = (meta.data.sheets || []).some((s) => s.properties.title === name);
+  if (!exists) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: masterId(),
+      requestBody: { requests: [{ addSheet: { properties: { title: name } } }] }
+    });
+  }
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: masterId(),
+    range: `'${name}'!A1:G1`
+  });
+  const cur = (res.data.values && res.data.values[0]) || [];
+  if (PELANGGAN_HEADER.some((h, i) => cur[i] !== h)) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: masterId(),
+      range: `'${name}'!A1:G1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [PELANGGAN_HEADER] }
+    });
+  }
+}
+
+async function readPelanggan() {
+  await ensureMasterPelanggan();
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: masterId(),
+    range: `'${masterSheetName()}'!A2:G`
+  });
+  const rows = res.data.values || [];
+  const list = [];
+  rows.forEach((r, i) => {
+    const id = (r[0] || '').trim();
+    if (!id) return;
+    list.push({
+      userId: id,
+      nama: (r[1] || '').trim(),
+      email: (r[2] || '').trim(),
+      spreadsheetId: (r[3] || '').trim(),
+      sheetName: (r[4] || '').trim() || config.sheetName || 'Sheet1',
+      paket: (r[5] || '').trim(),
+      aktifSampai: (r[6] || '').trim(),
+      rowNum: i + 2
+    });
+  });
+  return list;
+}
+
+function isLifetime(s) {
+  return /lifetime|seumur|selamanya|unlimited/i.test(String(s || '')) || String(s || '').trim() === '-';
+}
+
+function tenantActive(t) {
+  if (!t || !t.spreadsheetId) return false;
+  if (isLifetime(t.aktifSampai)) return true;
+  const raw = (t.aktifSampai || '').trim();
+  let exp = null;
+  let m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) exp = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  else if ((m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))) exp = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  if (!exp) return false;
+  const tz = getTimezone();
+  const now = new Date();
+  const td = new Date(
+    Number(now.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric' })),
+    Number(now.toLocaleDateString('en-US', { timeZone: tz, month: 'numeric' })) - 1,
+    Number(now.toLocaleDateString('en-US', { timeZone: tz, day: 'numeric' }))
+  );
+  return exp >= td;
+}
+
+async function resolveTenant(userId) {
+  const cached = _tenantCache.get(userId);
+  if (cached && Date.now() - cached.ts < TENANT_TTL_MS) return cached.tenant;
+  const list = await readPelanggan();
+  const found = list.find((x) => x.userId === userId) || null;
+  _tenantCache.set(userId, { tenant: found, ts: Date.now() });
+  return found;
+}
+
+async function getActiveTenants() {
+  const list = await readPelanggan();
+  return list.filter(tenantActive);
+}
+
+async function upsertPelanggan(obj) {
+  await ensureMasterPelanggan();
+  const list = await readPelanggan();
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const found = list.find((x) => x.userId === String(obj.userId).trim());
+  const row = [
+    String(obj.userId).trim(),
+    obj.nama || '',
+    obj.email || '',
+    obj.spreadsheetId || '',
+    obj.sheetName || (config.sheetName || 'Sheet1'),
+    obj.paket || '',
+    obj.aktifSampai || 'lifetime'
+  ];
+  if (found) {
+    // Pertahankan nilai lama bila field baru kosong.
+    row[1] = obj.nama || found.nama;
+    row[2] = obj.email || found.email;
+    row[3] = obj.spreadsheetId || found.spreadsheetId;
+    row[4] = obj.sheetName || found.sheetName;
+    row[5] = obj.paket || found.paket;
+    row[6] = obj.aktifSampai || found.aktifSampai;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: masterId(),
+      range: `'${masterSheetName()}'!A${found.rowNum}:G${found.rowNum}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [row] }
+    });
+  } else {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: masterId(),
+      range: `'${masterSheetName()}'!A:G`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [row] }
+    });
+  }
+  _tenantCache.delete(String(obj.userId).trim());
+  return !!found;
+}
+
+async function deletePelanggan(userId) {
+  const list = await readPelanggan();
+  const found = list.find((x) => x.userId === String(userId).trim());
+  if (!found) return false;
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: masterId(),
+    fields: 'sheets(properties(sheetId,title))'
+  });
+  const sh = (meta.data.sheets || []).find((s) => s.properties.title === masterSheetName());
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: masterId(),
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: { sheetId: sh.properties.sheetId, dimension: 'ROWS', startIndex: found.rowNum - 1, endIndex: found.rowNum }
+        }
+      }]
+    }
+  });
+  _tenantCache.delete(String(userId).trim());
+  return true;
+}
+
+// ---- Perintah admin (hanya untuk getAdminIds) ----
+
+bot.command('daftar', async (ctx) => {
+  try {
+    if (!isAdmin(ctx)) return;
+    const arg = (ctx.message.text || '').replace(/^\/daftar(@\S+)?\s*/i, '').trim();
+    const p = arg.split(';').map((s) => s.trim());
+    if (p.length < 4) {
+      return ctx.reply(
+        'Format:\n/daftar TelegramID; Nama; Email; SpreadsheetID; [AktifSampai]; [SheetName]\n\n' +
+        'Contoh:\n/daftar 356841296; Budi; budi@gmail.com; 1AbC...XyZ; 31/12/2026; Rekap\n' +
+        '(AktifSampai kosong = lifetime)'
+      );
+    }
+    await upsertPelanggan({
+      userId: p[0], nama: p[1], email: p[2], spreadsheetId: p[3],
+      aktifSampai: p[4] || 'lifetime', sheetName: p[5] || ''
+    });
+    return ctx.reply(`Pelanggan tersimpan ✅\n${p[1]} (${p[0]})\nAktif: ${p[4] || 'lifetime'}`);
+  } catch (err) {
+    logError('Gagal /daftar.', err);
+    return ctx.reply('Gagal mendaftarkan pelanggan.');
+  }
+});
+
+bot.command('pelanggan', async (ctx) => {
+  try {
+    if (!isAdmin(ctx)) return;
+    const list = await readPelanggan();
+    if (list.length === 0) return ctx.reply('Belum ada pelanggan.');
+    const lines = [`Daftar Pelanggan (${list.length})`, ''];
+    for (const t of list) {
+      const aktif = tenantActive(t) ? '🟢' : '🔴';
+      lines.push(`${aktif} ${t.nama || '-'} (${t.userId}) — ${t.paket || '-'} — s/d ${t.aktifSampai || '-'}`);
+    }
+    return ctx.reply(lines.join('\n'));
+  } catch (err) {
+    logError('Gagal /pelanggan.', err);
+    return ctx.reply('Gagal menampilkan pelanggan.');
+  }
+});
+
+bot.command('perpanjang', async (ctx) => {
+  try {
+    if (!isAdmin(ctx)) return;
+    const arg = (ctx.message.text || '').replace(/^\/perpanjang(@\S+)?\s*/i, '').trim();
+    const parts = arg.split(/\s+/);
+    if (parts.length < 2) {
+      return ctx.reply('Format: /perpanjang <TelegramID> <DD/MM/YYYY | lifetime>');
+    }
+    const ok = await upsertPelanggan({ userId: parts[0], aktifSampai: parts.slice(1).join(' ') });
+    return ctx.reply(ok ? `Masa aktif ${parts[0]} diperbarui ✅` : `Pelanggan ${parts[0]} belum ada, dibuat baru.`);
+  } catch (err) {
+    logError('Gagal /perpanjang.', err);
+    return ctx.reply('Gagal memperpanjang.');
+  }
+});
+
+bot.command('hapususer', async (ctx) => {
+  try {
+    if (!isAdmin(ctx)) return;
+    const id = (ctx.message.text || '').replace(/^\/hapususer(@\S+)?\s*/i, '').trim();
+    if (!id) return ctx.reply('Format: /hapususer <TelegramID>');
+    const ok = await deletePelanggan(id);
+    return ctx.reply(ok ? `Pelanggan ${id} dihapus.` : `Pelanggan ${id} tidak ditemukan.`);
+  } catch (err) {
+    logError('Gagal /hapususer.', err);
+    return ctx.reply('Gagal menghapus pelanggan.');
+  }
+});
+
+// ---- Middleware gerbang tenant (berlaku untuk semua handler di bawah) ----
+
+bot.use(async (ctx, next) => {
+  if (!isMultiTenant()) {
+    return tenantStore.run(
+      { spreadsheetId: config.spreadsheetId, sheetName: config.sheetName },
+      () => next()
+    );
+  }
+
+  const userId = String(ctx.from?.id || '').trim();
+  if (!userId) return;
+
+  let tenant = null;
+  try {
+    tenant = await resolveTenant(userId);
+  } catch (e) {
+    logError('Gagal resolve tenant.', e);
+  }
+
+  if (!tenant) {
+    if (isAdmin(ctx)) {
+      return tenantStore.run(
+        { spreadsheetId: config.spreadsheetId || masterId(), sheetName: config.sheetName },
+        () => next()
+      );
+    }
+    return ctx.reply(
+      'Halo! 👋 Kamu belum terdaftar.\n' +
+      'Untuk mulai memakai bot ini, daftar dulu via Instagram @rekapkeuangan ' +
+      'atau gabung grup: ' + groupLink()
+    );
+  }
+
+  if (!tenantActive(tenant)) {
+    return ctx.reply(
+      'Masa aktif kamu sudah berakhir ⏳\n' +
+      'Yuk perpanjang lewat @rekapkeuangan supaya bisa lanjut mencatat. Terima kasih! 🙏'
+    );
+  }
+
+  return tenantStore.run(
+    { spreadsheetId: tenant.spreadsheetId, sheetName: tenant.sheetName, nama: tenant.nama },
+    () => next()
+  );
+});
 
 bot.start(async (ctx) => {
   if (!(await guardOwner(ctx))) return;
@@ -3988,7 +4326,7 @@ bot.command('export', async (ctx) => {
     const client = await auth.getClient();
     const sheets = google.sheets({ version: 'v4', auth: client });
     const res = await sheets.spreadsheets.values.get({
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: ssId(),
       range: `'${getSheetName()}'!A:I`
     });
     const rows = res.data.values || [];
@@ -4094,7 +4432,7 @@ async function runMigration() {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!A:I`
   });
   const rows = res.data.values || [];
@@ -4114,7 +4452,7 @@ async function runMigration() {
   }
 
   await sheets.spreadsheets.values.update({
-    spreadsheetId: config.spreadsheetId,
+    spreadsheetId: ssId(),
     range: `'${sheetName}'!B2:C${rows.length}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: bcValues }
@@ -4778,7 +5116,7 @@ bot.on(['voice', 'audio'], async (ctx) => {
 
 bot.on('callback_query', async (ctx) => {
   try {
-    if (!isOwner(ctx)) {
+    if (!isMultiTenant() && !isOwner(ctx)) {
       await ctx.answerCbQuery('Tidak diizinkan');
       return;
     }
@@ -4949,12 +5287,77 @@ function getTzParts() {
   return { hour, day, month, year, dateKey };
 }
 
+async function sendMessageSafe(chatId, message) {
+  try {
+    await bot.telegram.sendMessage(chatId, message);
+  } catch (e) {
+    logError(`Gagal kirim pesan ke ${chatId}.`, e);
+  }
+}
+
 async function broadcast(message) {
   for (const chatId of getOwnerChatIds()) {
+    await sendMessageSafe(chatId, message);
+  }
+}
+
+// Jalankan tugas terjadwal untuk konteks aktif (1 tenant / single-tenant).
+async function runScheduled(o, send) {
+  const { day, month, year, doMonthly, doLangganan, doReminder } = o;
+
+  if (doMonthly) {
     try {
-      await bot.telegram.sendMessage(chatId, message);
+      let pm = month - 1;
+      let py = year;
+      if (pm < 1) { pm = 12; py -= 1; }
+      const rep = await buildMonthlyReport(pm, py);
+      if (rep.count > 0) {
+        const lines = [`📊 Laporan bulan ${buildMonthLabel(pm, py)}`, ''];
+        lines.push(`Pemasukan: ${formatRupiah(rep.income)}`);
+        lines.push(`Pengeluaran: ${formatRupiah(rep.expense)}`);
+        lines.push(`Saldo: ${formatRupiah(rep.saldo)}`);
+        if (rep.top.length > 0) {
+          lines.push('');
+          lines.push('Top pengeluaran:');
+          rep.top.forEach(([k, v], i) => lines.push(`${i + 1}. ${k}: ${formatRupiah(v)}`));
+        }
+        lines.push('');
+        lines.push('Ketik /laporan untuk detail + grafik.');
+        await send(lines.join('\n'));
+      }
     } catch (e) {
-      logError(`Gagal kirim pesan terjadwal ke ${chatId}.`, e);
+      logError('Gagal laporan bulanan terjadwal.', e);
+    }
+  }
+
+  if (doLangganan) {
+    try {
+      const posted = await runDueLangganan(day, month, year);
+      if (posted.length > 0) {
+        await send(
+          'Langganan dicatat otomatis hari ini ✅\n' +
+          posted.map((l) => `- ${l.nama}: ${formatRupiah(l.nominal)}`).join('\n')
+        );
+      }
+    } catch (e) {
+      logError('Gagal langganan terjadwal.', e);
+    }
+  }
+
+  if (doReminder) {
+    try {
+      const summary = await getDailySummary(day, month, year);
+      let msg = '⏰ Reminder catat keuangan hari ini.';
+      if (summary.items.length > 0) {
+        msg +=
+          `\nHari ini: keluar ${formatRupiah(summary.totalPengeluaran)}, ` +
+          `masuk ${formatRupiah(summary.totalPemasukan)}.`;
+      } else {
+        msg += '\nBelum ada transaksi tercatat hari ini.';
+      }
+      await send(msg);
+    } catch (e) {
+      logError('Gagal reminder terjadwal.', e);
     }
   }
 }
@@ -4962,80 +5365,39 @@ async function broadcast(message) {
 async function schedulerTick() {
   try {
     const { hour, day, month, year, dateKey } = getTzParts();
-
     const reminderEnabled = config.reminderEnabled !== false;
     const reminderHour = Number.isInteger(config.reminderHour) ? config.reminderHour : 20;
     const langgananHour = Number.isInteger(config.langgananHour) ? config.langgananHour : 7;
     const monthlyReportEnabled = config.monthlyReportEnabled !== false;
     const monthlyReportHour = Number.isInteger(config.monthlyReportHour) ? config.monthlyReportHour : 8;
-
-    // Laporan bulanan otomatis (tanggal 1, untuk bulan sebelumnya)
     const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-    if (
-      monthlyReportEnabled &&
-      day === 1 &&
-      hour === monthlyReportHour &&
-      lastMonthlyReportKey !== monthKey
-    ) {
-      lastMonthlyReportKey = monthKey;
-      try {
-        let pm = month - 1;
-        let py = year;
-        if (pm < 1) { pm = 12; py -= 1; }
-        const rep = await buildMonthlyReport(pm, py);
-        if (rep.count > 0) {
-          const lines = [`📊 Laporan bulan ${buildMonthLabel(pm, py)}`, ''];
-          lines.push(`Pemasukan: ${formatRupiah(rep.income)}`);
-          lines.push(`Pengeluaran: ${formatRupiah(rep.expense)}`);
-          lines.push(`Saldo: ${formatRupiah(rep.saldo)}`);
-          if (rep.top.length > 0) {
-            lines.push('');
-            lines.push('Top pengeluaran:');
-            rep.top.forEach(([k, v], i) => lines.push(`${i + 1}. ${k}: ${formatRupiah(v)}`));
-          }
-          lines.push('');
-          lines.push('Ketik /laporan untuk detail + grafik.');
-          await broadcast(lines.join('\n'));
-        }
-      } catch (e) {
-        logError('Gagal kirim laporan bulanan.', e);
+
+    const doMonthly = monthlyReportEnabled && day === 1 && hour === monthlyReportHour && lastMonthlyReportKey !== monthKey;
+    const doLangganan = hour === langgananHour && lastLanggananDate !== dateKey;
+    const doReminder = reminderEnabled && hour === reminderHour && lastReminderDate !== dateKey;
+    if (!doMonthly && !doLangganan && !doReminder) return;
+
+    const o = { day, month, year, doMonthly, doLangganan, doReminder };
+
+    if (isMultiTenant()) {
+      let tenants = [];
+      try { tenants = await getActiveTenants(); } catch (e) { logError('Gagal ambil tenant aktif.', e); }
+      for (const t of tenants) {
+        await tenantStore.run(
+          { spreadsheetId: t.spreadsheetId, sheetName: t.sheetName },
+          async () => { await runScheduled(o, (msg) => sendMessageSafe(t.userId, msg)); }
+        );
       }
+    } else {
+      await tenantStore.run(
+        { spreadsheetId: config.spreadsheetId, sheetName: config.sheetName },
+        async () => { await runScheduled(o, broadcast); }
+      );
     }
 
-    // Langganan jatuh tempo
-    if (hour === langgananHour && lastLanggananDate !== dateKey) {
-      lastLanggananDate = dateKey;
-      try {
-        const posted = await runDueLangganan(day, month, year);
-        if (posted.length > 0) {
-          await broadcast(
-            'Langganan dicatat otomatis hari ini ✅\n' +
-            posted.map((l) => `- ${l.nama}: ${formatRupiah(l.nominal)}`).join('\n')
-          );
-        }
-      } catch (e) {
-        logError('Gagal proses langganan terjadwal.', e);
-      }
-    }
-
-    // Reminder harian
-    if (reminderEnabled && hour === reminderHour && lastReminderDate !== dateKey) {
-      lastReminderDate = dateKey;
-      try {
-        const summary = await getDailySummary(day, month, year);
-        let msg = '⏰ Reminder catat keuangan hari ini.';
-        if (summary.items.length > 0) {
-          msg +=
-            `\nHari ini: keluar ${formatRupiah(summary.totalPengeluaran)}, ` +
-            `masuk ${formatRupiah(summary.totalPemasukan)}.`;
-        } else {
-          msg += '\nBelum ada transaksi tercatat hari ini.';
-        }
-        await broadcast(msg);
-      } catch (e) {
-        logError('Gagal kirim reminder.', e);
-      }
-    }
+    if (doMonthly) lastMonthlyReportKey = monthKey;
+    if (doLangganan) lastLanggananDate = dateKey;
+    if (doReminder) lastReminderDate = dateKey;
   } catch (e) {
     logError('Scheduler error.', e);
   }
@@ -5079,7 +5441,7 @@ logInfo('Started bot...');
 
 bot.launch().then(() => {
   registerBotCommands();
-  loadCustomCategoryRules();
+  if (!isMultiTenant()) loadCustomCategoryRules();
 }).catch((err) => {
   logError('Launch error:', err);
 });

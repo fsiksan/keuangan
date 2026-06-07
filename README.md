@@ -280,6 +280,44 @@ Reminder & langganan otomatis dikirim ke semua user tersebut.
 > `spreadsheetId` berbeda. Tapi untuk pasangan, satu sheet gabungan + kolom
 > Pencatat jauh lebih praktis (budget & saldo menyatu).
 
+## Mode Multi-tenant (jual ke banyak pelanggan)
+
+Satu bot bisa melayani **banyak pelanggan**, masing-masing dengan spreadsheet
+sendiri dan masa aktif sendiri. Aktifkan di `rekap.json`:
+
+```json
+"multiTenant": true,
+"masterSpreadsheetId": "ID_SPREADSHEET_MASTER",
+"pelangganSheetName": "Pelanggan",
+"adminUserIds": "356841296",
+"groupLink": "https://t.me/+D5IRzFMN2mM5NzM1"
+```
+
+- **masterSpreadsheetId**: spreadsheet pusat berisi sheet **Pelanggan** dengan
+  kolom: `Telegram ID | Nama | Email | Spreadsheet ID | Sheet Name | Paket | Aktif Sampai`
+  (header dibuat otomatis). Pastikan service account jadi editor di sini & di tiap sheet pelanggan.
+- **adminUserIds**: yang boleh memakai perintah admin (default = ownerUserId).
+- User yang belum terdaftar / kedaluwarsa otomatis ditolak dengan ajakan daftar.
+
+**Perintah admin:**
+```
+/daftar TelegramID; Nama; Email; SpreadsheetID; [AktifSampai]; [SheetName]
+   contoh: /daftar 356841296; Budi; budi@gmail.com; 1AbC...; 31/12/2026; Rekap
+   (AktifSampai kosong = lifetime; format tanggal DD/MM/YYYY atau YYYY-MM-DD)
+/pelanggan                 - daftar pelanggan + status aktif
+/perpanjang TelegramID DD/MM/YYYY   (atau: lifetime)
+/hapususer TelegramID
+```
+
+**Alur onboarding:** pelanggan bayar -> join grup Telegram (lihat username/ID)
+-> isi Email & Nama (via Google Form) -> kamu salin template sheet, share ke
+email pelanggan (Editor) + share ke service account -> jalankan `/daftar ...`
+-> kirim link bot + panduan. Selesai, pelanggan langsung bisa pakai.
+
+> Catatan: fitur "kategori map" (pemetaan kategori custom) hanya aktif di mode
+> pribadi (single-tenant); di mode multi-tenant dinonaktifkan agar tidak
+> tercampur antar pelanggan.
+
 ## Kolom Spreadsheet
 
 | Tanggal | Item | Kategori | Toko | Pemasukan | Pengeluaran | Catatan | Pencatat |
