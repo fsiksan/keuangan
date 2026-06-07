@@ -1303,8 +1303,20 @@ async function updateAnalisaSheet() {
   // Perbarui saldo tiap akun di Neraca (otomatis dari transaksi).
   try {
     await refreshAccounts(entries);
+    await formatNeracaSheet();
   } catch (e) {
-    logError('Gagal memperbarui akun di Neraca.', e);
+    logError('Gagal memperbarui Neraca.', e);
+  }
+
+  // Perbarui sheet Budget (Terpakai/Sisa + grafik) untuk bulan berjalan.
+  try {
+    const _tz = getTimezone();
+    const _now = new Date();
+    const _m = Number(_now.toLocaleDateString('en-US', { timeZone: _tz, month: 'numeric' }));
+    const _y = Number(_now.toLocaleDateString('en-US', { timeZone: _tz, year: 'numeric' }));
+    await refreshBudgetSheet(_m, _y);
+  } catch (e) {
+    logError('Gagal memperbarui Budget.', e);
   }
 
   return {

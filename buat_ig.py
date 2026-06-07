@@ -103,4 +103,14 @@ draw_post(cs,Ws,Hs,"dark","Rekap Keuangan",
     ["- Catat lewat chat / suara","- Foto struk auto-baca","- Budget, target, neraca","- Laporan + grafik otomatis","","Mulai Rp99rb/tahun.","Setup dibantu sampai jalan."],
     "Geser / DM 'MAU'", tsize=80)
 cs.save()
+
+# ---- STORY: CARA BELI 1080x1920 ----
+cb=canvas.Canvas("ig_carabeli.pdf",pagesize=(Ws,Hs))
+draw_post(cb,Ws,Hs,"cream","Gampang kok",
+    "Cara Beli",
+    ["- 1. DM Instagram / WhatsApp, pilih paket","- 2. Bayar (QRIS / transfer / e-wallet)",
+     "- 3. Join grup Telegram (verifikasi)","- 4. Isi form: nama + email Google",
+     "- 5. Akun aktif, langsung mulai catat!","","Setup dibantu sampai jalan."],
+    "DM 'MAU' sekarang", tsize=92)
+cb.save()
 print("OK")
