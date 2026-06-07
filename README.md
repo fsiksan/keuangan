@@ -155,6 +155,7 @@ node rekap.js
 | /edit | Edit transaksi terakhir (item/kategori/toko/nominal/catatan) |
 | /hapus | Hapus transaksi terakhir (dengan konfirmasi) |
 | /batal | Kembalikan transaksi yang baru saja dihapus |
+| /migrasi | Rapikan data lama (normalisasi kategori, isi Item kosong) |
 
 ### Hutang & Piutang
 
@@ -207,8 +208,12 @@ budget makanan 1jt          # set budget bulanan per kategori
 target liburan 5jt          # buat target tabungan
 nabung liburan 500k         # tambah tabungan ke target
 /langganan tambah Netflix; Hiburan; 54000; 1   # tagihan rutin tiap tgl 1
+/langganan tambah Gaji; Gaji; 5jt; 25; ; masuk # PEMASUKAN rutin tiap tgl 25
 /langganan jalan            # catat langganan jatuh tempo hari ini
 ```
+
+Langganan mendukung **pengeluaran** dan **pemasukan rutin** (tambahkan
+`masuk` di field terakhir). Cocok untuk gaji, cicilan, atau langganan bulanan.
 
 Bot memberi **peringatan budget** otomatis saat pengeluaran kategori mendekati
 (80%) atau melebihi batas, dan **reminder harian** + **langganan otomatis**
@@ -271,10 +276,11 @@ Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Hutang**, **Ka
 
 Sheet **Analisa** dibuat & diperbarui otomatis setiap ada transaksi, berisi:
 * Ringkasan: total pemasukan, pengeluaran, saldo, jumlah transaksi, rata-rata pengeluaran
-* Tabel pengeluaran per kategori & per toko (dengan persentase)
+* Tabel pengeluaran per kategori, per toko, per pencatat (dengan persentase)
+* Tabel **pemasukan per kategori**
 * Ringkasan per bulan (pemasukan, pengeluaran, saldo)
-* **Grafik**: pie Pemasukan vs Pengeluaran, pie per Kategori, pie per Toko,
-  dan bar Pemasukan & Pengeluaran per Bulan
+* **Grafik**: pie Pemasukan vs Pengeluaran, pie pengeluaran per Kategori/Toko/Pencatat,
+  pie pemasukan per Kategori, dan bar Pemasukan & Pengeluaran per Bulan
 
 ## Induk Kategori (anti kategori ganda)
 
