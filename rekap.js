@@ -41,7 +41,7 @@ let lastDeletedRow = null;
 const mainKeyboard = Markup.keyboard([
   ['/ringkasan', '/saldo', '/hari', '/minggu', '/bulan'],
   ['/laporan', '/analisa', '/kategori', '/tips'],
-  ['/budget', '/target', '/langganan', '/hutang'],
+  ['/budget', '/target', '/langganan', '/hutang', '/neraca'],
   ['/cari', '/export', '/edit', '/hapus', '/batal'],
   ['/help']
 ]).resize();
@@ -122,6 +122,10 @@ function getHutangSheetName() {
 
 function getKategoriMapSheetName() {
   return config.kategoriMapSheetName || 'KategoriMap';
+}
+
+function getNeracaSheetName() {
+  return config.neracaSheetName || 'Neraca';
 }
 
 // Pemetaan kategori custom dari user (kata kunci -> induk kategori).
@@ -1250,6 +1254,13 @@ async function updateAnalisaSheet() {
     requestBody: { requests },
   });
 
+  // Perbarui Kas otomatis di Neraca (saldo = pemasukan - pengeluaran).
+  try {
+    await refreshKas(saldo);
+  } catch (e) {
+    logError('Gagal memperbarui Kas di Neraca.', e);
+  }
+
   return {
     totalPemasukan,
     totalPengeluaran,
@@ -2118,6 +2129,125 @@ async function deleteHutangByName(nama) {
   return matched.length;
 }
 
+// ----- Neraca (balance sheet): aset & liabilitas -----
+
+const NERACA_HEADER = ['Tipe', 'Nama', 'Nilai'];
+
+async function getNeraca() {
+  const sheetName = getNeracaSheetName();
+  await ensureSheetWithHeader(sheetName, NERACA_HEADER);
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A2:C`
+  });
+  const rows = res.data.values || [];
+  const list = [];
+  rows.forEach((r, i) => {
+    const tipeRaw = (r[0] || '').trim().toLowerCase();
+    const nama = (r[1] || '').trim();
+    if (!nama) return;
+    const tipe = /liab|kewajiban|utang|hutang/.test(tipeRaw) ? 'Liabilitas' : 'Aset';
+    list.push({ tipe, nama, nilai: parseRupiahTextToNumber(r[2] || ''), rowNum: i + 2 });
+  });
+  return list;
+}
+
+// Set/perbarui nilai kas otomatis (saldo dari transaksi).
+async function refreshKas(saldo) {
+  const sheetName = getNeracaSheetName();
+  await ensureSheetWithHeader(sheetName, NERACA_HEADER);
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A2:C`
+  });
+  const rows = res.data.values || [];
+  let foundRow = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if ((rows[i][1] || '').trim().toLowerCase() === 'kas') { foundRow = i; break; }
+  }
+  if (foundRow >= 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: config.spreadsheetId,
+      range: `'${sheetName}'!A${foundRow + 2}:C${foundRow + 2}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [['Aset', 'Kas', Math.round(saldo)]] }
+    });
+  } else {
+    // Sisipkan Kas sebagai baris pertama data.
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: config.spreadsheetId,
+      range: `'${sheetName}'!A2:C2`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [['Aset', 'Kas', Math.round(saldo)]] }
+    });
+    // Bila A2 sebelumnya berisi data user, pindahkan? Untuk amannya, append data lama tidak diutak-atik;
+    // skenario ini hanya terjadi saat sheet baru (kosong), jadi aman.
+  }
+}
+
+async function addNeracaItem(tipe, nama, nilai) {
+  const sheetName = getNeracaSheetName();
+  await ensureSheetWithHeader(sheetName, NERACA_HEADER);
+  const canonTipe = tipe === 'Liabilitas' ? 'Liabilitas' : 'Aset';
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A2:C`
+  });
+  const rows = res.data.values || [];
+  let foundRow = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const t = /liab|kewajiban|utang|hutang/.test((rows[i][0] || '').toLowerCase()) ? 'Liabilitas' : 'Aset';
+    if (t === canonTipe && (rows[i][1] || '').trim().toLowerCase() === nama.toLowerCase()) {
+      foundRow = i;
+      break;
+    }
+  }
+  if (foundRow >= 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: config.spreadsheetId,
+      range: `'${sheetName}'!A${foundRow + 2}:C${foundRow + 2}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[canonTipe, nama, Math.round(nilai)]] }
+    });
+  } else {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: config.spreadsheetId,
+      range: `'${sheetName}'!A:C`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[canonTipe, nama, Math.round(nilai)]] }
+    });
+  }
+  return canonTipe;
+}
+
+async function deleteNeracaItem(tipe, nama) {
+  const sheetName = getNeracaSheetName();
+  const canonTipe = tipe === 'Liabilitas' ? 'Liabilitas' : 'Aset';
+  const list = await getNeraca();
+  const found = list.find((x) => x.tipe === canonTipe && x.nama.toLowerCase() === nama.toLowerCase());
+  if (!found) return false;
+  const sheetId = await getSheetIdByName(sheetName);
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: config.spreadsheetId,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: { sheetId, dimension: 'ROWS', startIndex: found.rowNum - 1, endIndex: found.rowNum }
+        }
+      }]
+    }
+  });
+  return true;
+}
+
 // ----- Laporan bulanan (perbandingan, proyeksi, top, anomali) -----
 
 async function buildMonthlyReport(month, year) {
@@ -2585,6 +2715,12 @@ bot.command('help', async (ctx) => {
     'piutang <nama> <nominal>      (orang pinjam ke kamu)\n' +
     'lunas <nama>                  (tandai lunas)\n' +
     '\n' +
+    'Neraca (aset & liabilitas):\n' +
+    'aset <nama> <nominal>         (mis: aset Bank BCA 5jt)\n' +
+    'liabilitas <nama> <nominal>   (mis: liabilitas KPR 100jt)\n' +
+    'aset hapus <nama> / liabilitas hapus <nama>\n' +
+    '(Kas terisi otomatis dari transaksi)\n' +
+    '\n' +
     'Atur kategori sendiri:\n' +
     'kategori map <kata> <Induk>   (mis: kategori map rokok Pribadi)\n' +
     'kategori unmap <kata>         (hapus pemetaan)\n' +
@@ -2605,6 +2741,7 @@ bot.command('help', async (ctx) => {
     '   /langganan tambah Nama; Kategori; Nominal; Hari\n' +
     '   /langganan jalan | /langganan hapus <nama>\n' +
     '/hutang - catatan hutang & piutang\n' +
+    '/neraca - aset, liabilitas, ekuitas (Kas otomatis)\n' +
     '/cari <kata> - cari transaksi\n' +
     '/export [MM YYYY] - unduh data CSV (semua / per bulan)\n' +
     '/edit - edit transaksi terakhir (item/kategori/toko/nominal/catatan)\n' +
@@ -3618,6 +3755,56 @@ async function runMigration() {
   return changed;
 }
 
+bot.command('neraca', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    // Pastikan Kas terbaru.
+    let saldo = 0;
+    try {
+      const entries = await getAllEntries();
+      for (const e of entries) saldo += e.pemasukan - e.pengeluaran;
+      await refreshKas(saldo);
+    } catch (e) {
+      logError('Gagal hitung kas untuk neraca.', e);
+    }
+
+    const list = await getNeraca();
+    const aset = list.filter((x) => x.tipe === 'Aset');
+    const liab = list.filter((x) => x.tipe === 'Liabilitas');
+    const totalAset = aset.reduce((s, x) => s + x.nilai, 0);
+    const totalLiab = liab.reduce((s, x) => s + x.nilai, 0);
+    const ekuitas = totalAset - totalLiab;
+
+    const lines = ['🏦 NERACA (Balance Sheet)', ''];
+    lines.push('💰 ASET');
+    if (aset.length === 0) {
+      lines.push('- (belum ada)');
+    } else {
+      for (const x of aset) lines.push(`- ${x.nama}: ${formatRupiah(x.nilai)}`);
+    }
+    lines.push(`Total Aset: ${formatRupiah(totalAset)}`);
+    lines.push('');
+    lines.push('📕 LIABILITAS');
+    if (liab.length === 0) {
+      lines.push('- (belum ada)');
+    } else {
+      for (const x of liab) lines.push(`- ${x.nama}: ${formatRupiah(x.nilai)}`);
+    }
+    lines.push(`Total Liabilitas: ${formatRupiah(totalLiab)}`);
+    lines.push('');
+    lines.push(`💎 EKUITAS (kekayaan bersih): ${formatRupiah(ekuitas)}`);
+    lines.push('');
+    lines.push('Kas terisi otomatis dari transaksi.');
+    lines.push('Tambah: aset <nama> <nominal> / liabilitas <nama> <nominal>');
+
+    return ctx.reply(lines.join('\n'));
+  } catch (err) {
+    logError('Gagal menampilkan neraca.', err);
+    return ctx.reply('Gagal menampilkan neraca.');
+  }
+});
+
 bot.command('ringkasan', async (ctx) => {
   try {
     if (!(await guardOwner(ctx))) return;
@@ -4078,6 +4265,39 @@ async function handleKeywordText(ctx, text) {
     return true;
   }
 
+  // Neraca: aset/liabilitas <nama> <nominal>  |  aset/liabilitas hapus <nama>
+  const neracaMatch = text.match(/^(aset|liabilitas|kewajiban)\s+/i);
+  if (neracaMatch) {
+    const tipe = /^aset/i.test(neracaMatch[1]) ? 'Aset' : 'Liabilitas';
+    const label = tipe === 'Aset' ? 'aset' : 'liabilitas';
+    const rest = text.replace(/^(aset|liabilitas|kewajiban)\s+/i, '').trim();
+
+    if (/^hapus\s+/i.test(rest)) {
+      const nama = rest.replace(/^hapus\s+/i, '').trim();
+      const ok = await deleteNeracaItem(tipe, nama);
+      await ctx.reply(ok ? `${tipe} "${nama}" dihapus dari neraca.` : `${tipe} "${nama}" tidak ditemukan.`);
+      return true;
+    }
+
+    const m = rest.match(/^(.+?)\s+(\S+)$/);
+    if (!m) {
+      await ctx.reply(`Format: ${label} <nama> <nominal>\nContoh: ${label} ${tipe === 'Aset' ? 'Bank BCA 5jt' : 'KPR 100jt'}`);
+      return true;
+    }
+    if (m[1].trim().toLowerCase() === 'kas') {
+      await ctx.reply('Kas terisi otomatis dari transaksi, tidak perlu diinput manual 🙂');
+      return true;
+    }
+    const nilai = await parseAmountToNumber(m[2]);
+    if (!nilai) {
+      await ctx.reply('Nominal tidak valid.');
+      return true;
+    }
+    const canon = await addNeracaItem(tipe, m[1].trim(), nilai);
+    await ctx.reply(`Sip 👌 ${canon} "${m[1].trim()}" dicatat: ${formatRupiah(nilai)}. Lihat /neraca`);
+    return true;
+  }
+
   return false;
 }
 
@@ -4411,6 +4631,7 @@ async function registerBotCommands() {
       { command: 'help', description: 'Panduan lengkap' },
       { command: 'menu', description: 'Tampilkan tombol pintasan' },
       { command: 'ringkasan', description: 'Ringkasan keuangan (dashboard)' },
+      { command: 'neraca', description: 'Neraca: aset, liabilitas, ekuitas' },
       { command: 'saldo', description: 'Saldo total & bulan ini' },
       { command: 'hari', description: 'Rekap hari ini' },
       { command: 'minggu', description: 'Rekap 7 hari terakhir' },

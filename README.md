@@ -150,12 +150,31 @@ node rekap.js
 | /target | Lihat target tabungan & progress |
 | /langganan | Kelola tagihan rutin (tambah/hapus/jalan) |
 | /hutang | Catatan hutang & piutang |
+| /neraca | Neraca: aset, liabilitas, ekuitas (Kas otomatis) |
 | /cari <kata> | Cari transaksi (kategori/toko/catatan/pencatat) |
 | /export [MM YYYY] | Unduh data CSV (semua atau per bulan) |
 | /edit | Edit transaksi terakhir (item/kategori/toko/nominal/catatan) |
 | /hapus | Hapus transaksi terakhir (dengan konfirmasi) |
 | /batal | Kembalikan transaksi yang baru saja dihapus |
 | /migrasi | Rapikan data lama (normalisasi kategori, isi Item kosong) |
+
+### Neraca (Balance Sheet)
+
+Sheet **Neraca** berisi **Aset** & **Liabilitas** yang bisa kamu input, dan
+otomatis menghitung **Ekuitas** (kekayaan bersih = Aset − Liabilitas).
+
+```
+aset Bank BCA 5jt          # tambah aset
+aset Emas 10jt
+liabilitas KPR 100jt       # tambah liabilitas/kewajiban
+aset hapus Emas            # hapus item
+/neraca                    # lihat neraca lengkap
+```
+
+Baris **Kas** terisi & diperbarui **otomatis** dari transaksi (saldo =
+pemasukan − pengeluaran), jadi setiap pencatatan langsung memengaruhi neraca.
+Item lain (bank, emas, properti, utang) diinput manual lewat perintah di atas
+atau langsung di sheet **Neraca** (kolom: Tipe, Nama, Nilai).
 
 ### Hutang & Piutang
 
@@ -270,7 +289,7 @@ kategori map                    # lihat semua pemetaan
 Pemetaan custom diprioritaskan di atas aturan bawaan dan disimpan di sheet
 **KategoriMap**.
 
-Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Hutang**, **KategoriMap**, **Analisa**.
+Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Hutang**, **KategoriMap**, **Neraca**, **Analisa**.
 
 ## Sheet Analisa (otomatis + grafik)
 
