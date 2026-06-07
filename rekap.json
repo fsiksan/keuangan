@@ -10,6 +10,7 @@
   "langgananSheetName": "Langganan",
   "targetSheetName": "Target",
   "hutangSheetName": "Hutang",
+  "kategoriMapSheetName": "KategoriMap",
   "credentialsFile": "./rekap-credentials.json",
   "timezone": "Asia/Jakarta",
   "reminderEnabled": true,

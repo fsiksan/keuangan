@@ -40,7 +40,7 @@ let lastDeletedRow = null;
 // Keyboard pintasan yang muncul di bawah kolom ketik.
 const mainKeyboard = Markup.keyboard([
   ['/ringkasan', '/saldo', '/hari', '/minggu', '/bulan'],
-  ['/laporan', '/analisa', '/kategori'],
+  ['/laporan', '/analisa', '/kategori', '/tips'],
   ['/budget', '/target', '/langganan', '/hutang'],
   ['/cari', '/export', '/edit', '/hapus', '/batal'],
   ['/help']
@@ -120,6 +120,14 @@ function getHutangSheetName() {
   return config.hutangSheetName || 'Hutang';
 }
 
+function getKategoriMapSheetName() {
+  return config.kategoriMapSheetName || 'KategoriMap';
+}
+
+// Pemetaan kategori custom dari user (kata kunci -> induk kategori).
+// Diisi saat startup & diperbarui saat user menambah/menghapus.
+let customCategoryRules = [];
+
 // Aturan induk kategori untuk pengeluaran (urutan = prioritas)
 const EXPENSE_CATEGORY_RULES = [
   ['Makanan', ['makan', 'makanan', 'food', 'jajan', 'snack', 'cemilan', 'camilan', 'restoran', 'resto', 'warung', 'warteg', 'nasi', 'bakso', 'mie', 'ayam', 'sate', 'gofood', 'grabfood', 'sarapan', 'lunch', 'dinner']],
@@ -152,17 +160,25 @@ function titleCase(str) {
 
 // Satukan sinonim kategori menjadi satu induk kategori.
 // Contoh: "makan", "makanan", "warung" -> "Makanan".
+function matchKeyword(s, kw) {
+  const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(s);
+}
+
 function normalizeCategory(raw, type) {
   const s = String(raw || '').toLowerCase().trim();
   if (!s) return 'Lainnya';
+
+  // Pemetaan custom dari user diprioritaskan.
+  for (const [keyword, canonical] of customCategoryRules) {
+    if (matchKeyword(s, keyword)) return canonical;
+  }
 
   const rules = type === 'pemasukan' ? INCOME_CATEGORY_RULES : EXPENSE_CATEGORY_RULES;
 
   for (const [canonical, keywords] of rules) {
     for (const kw of keywords) {
-      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`\\b${escaped}\\b`, 'i');
-      if (re.test(s)) return canonical;
+      if (matchKeyword(s, kw)) return canonical;
     }
   }
 
@@ -1391,6 +1407,131 @@ async function parseAmountToNumber(text) {
   return parseRupiahTextToNumber(t);
 }
 
+// ----- Pemetaan kategori custom -----
+
+async function loadCustomCategoryRules() {
+  try {
+    const sheetName = getKategoriMapSheetName();
+    await ensureSheetWithHeader(sheetName, ['Kata Kunci', 'Kategori']);
+    const client = await auth.getClient();
+    const sheets = google.sheets({ version: 'v4', auth: client });
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: config.spreadsheetId,
+      range: `'${sheetName}'!A2:B`
+    });
+    const rows = res.data.values || [];
+    customCategoryRules = rows
+      .map((r) => [(r[0] || '').trim().toLowerCase(), (r[1] || '').trim()])
+      .filter(([k, v]) => k && v);
+    logInfo(`Pemetaan kategori custom: ${customCategoryRules.length} aturan.`);
+  } catch (e) {
+    logError('Gagal memuat pemetaan kategori custom.', e);
+  }
+}
+
+async function addCategoryMap(keyword, kategori) {
+  const sheetName = getKategoriMapSheetName();
+  await ensureSheetWithHeader(sheetName, ['Kata Kunci', 'Kategori']);
+  const kw = keyword.trim().toLowerCase();
+  const kat = titleCase(kategori);
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A2:B`
+  });
+  const rows = res.data.values || [];
+  let found = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if ((rows[i][0] || '').trim().toLowerCase() === kw) { found = i; break; }
+  }
+  if (found >= 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: config.spreadsheetId,
+      range: `'${sheetName}'!A${found + 2}:B${found + 2}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[kw, kat]] }
+    });
+  } else {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: config.spreadsheetId,
+      range: `'${sheetName}'!A:B`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[kw, kat]] }
+    });
+  }
+  await loadCustomCategoryRules();
+  return { keyword: kw, kategori: kat };
+}
+
+async function removeCategoryMap(keyword) {
+  const sheetName = getKategoriMapSheetName();
+  const kw = keyword.trim().toLowerCase();
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.spreadsheetId,
+    range: `'${sheetName}'!A2:B`
+  });
+  const rows = res.data.values || [];
+  let found = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if ((rows[i][0] || '').trim().toLowerCase() === kw) { found = i; break; }
+  }
+  if (found < 0) return false;
+  const sheetId = await getSheetIdByName(sheetName);
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: config.spreadsheetId,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: { sheetId, dimension: 'ROWS', startIndex: found + 1, endIndex: found + 2 }
+        }
+      }]
+    }
+  });
+  await loadCustomCategoryRules();
+  return true;
+}
+
+// ----- Bantuan LLM teks (untuk /tips) -----
+
+async function askLlmText(prompt) {
+  if (getLlmProvider() === 'openai') {
+    const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('openaiApiKey belum diisi');
+    const baseUrl = (config.openaiBaseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+    const model = config.openaiModel || 'gpt-4o';
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: 600,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    if (!res.ok) {
+      const d = await res.text().catch(() => '');
+      throw new Error(`LLM error ${res.status}: ${d.slice(0, 150)}`);
+    }
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content === 'string') return content.trim();
+    if (Array.isArray(content)) return content.map((c) => (typeof c === 'string' ? c : c?.text || '')).join('').trim();
+    return '';
+  }
+
+  if (!anthropic) throw new Error('anthropicApiKey belum diisi');
+  const response = await anthropic.messages.create({
+    model: config.anthropicModel || 'claude-opus-4-8',
+    max_tokens: 600,
+    messages: [{ role: 'user', content: prompt }]
+  });
+  const textBlock = response.content.find((b) => b.type === 'text');
+  return textBlock ? textBlock.text.trim() : '';
+}
+
 // ----- Budget -----
 
 async function getBudgets() {
@@ -2338,6 +2479,10 @@ bot.command('help', async (ctx) => {
     'piutang <nama> <nominal>      (orang pinjam ke kamu)\n' +
     'lunas <nama>                  (tandai lunas)\n' +
     '\n' +
+    'Atur kategori sendiri:\n' +
+    'kategori map <kata> <Induk>   (mis: kategori map rokok Pribadi)\n' +
+    'kategori unmap <kata>         (hapus pemetaan)\n' +
+    '\n' +
     'Perintah:\n' +
     '/ringkasan - dashboard keuangan\n' +
     '/saldo - saldo total & bulan ini\n' +
@@ -2347,6 +2492,7 @@ bot.command('help', async (ctx) => {
     '/laporan [MM YYYY] - laporan + grafik + proyeksi\n' +
     '/analisa - analisa lengkap + grafik di Sheet\n' +
     '/kategori - rincian item per kategori bulan ini\n' +
+    '/tips - saran hemat dari AI\n' +
     '/budget - lihat budget & pemakaian\n' +
     '/target - lihat target tabungan\n' +
     '/langganan - kelola tagihan rutin\n' +
@@ -2809,6 +2955,61 @@ bot.command('kategori', async (ctx) => {
   } catch (err) {
     logError('Gagal menampilkan kategori.', err);
     return ctx.reply('Gagal menampilkan rincian kategori.');
+  }
+});
+
+bot.command('tips', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+
+    if (!isLlmConfigured()) {
+      return ctx.reply(
+        'Fitur tips AI belum aktif. Isi API key LLM di rekap.json ' +
+        '(anthropicApiKey atau openaiApiKey).'
+      );
+    }
+
+    const tz = getTimezone();
+    const now = new Date();
+    const month = Number(now.toLocaleDateString('en-US', { timeZone: tz, month: 'numeric' }));
+    const year = Number(now.toLocaleDateString('en-US', { timeZone: tz, year: 'numeric' }));
+
+    const rep = await buildMonthlyReport(month, year);
+    if (rep.count === 0) {
+      return ctx.reply('Belum ada transaksi bulan ini untuk dianalisis.');
+    }
+
+    await ctx.reply('Menganalisis keuanganmu... 🤔');
+
+    const katText = Object.entries(rep.perKat)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k}: ${formatRupiah(v)}`)
+      .join(', ');
+
+    const prompt =
+      'Kamu penasihat keuangan pribadi. Berdasarkan data bulan ' +
+      `${buildMonthLabel(month, year)} berikut, beri 3-4 saran hemat yang ` +
+      'spesifik, praktis, dan ramah dalam Bahasa Indonesia. Singkat, pakai poin. ' +
+      'Jangan mengulang angka mentah terlalu banyak.\n\n' +
+      `Pemasukan: ${formatRupiah(rep.income)}\n` +
+      `Pengeluaran: ${formatRupiah(rep.expense)}\n` +
+      `Saldo: ${formatRupiah(rep.saldo)}\n` +
+      `Pengeluaran per kategori: ${katText}\n` +
+      (rep.lastExpense > 0 ? `Pengeluaran bulan lalu: ${formatRupiah(rep.lastExpense)}\n` : '');
+
+    let tips = '';
+    try {
+      tips = await askLlmText(prompt);
+    } catch (e) {
+      logError('Gagal minta tips ke LLM.', e);
+      return ctx.reply('Gagal mengambil tips dari AI. Coba lagi nanti.');
+    }
+
+    if (!tips) return ctx.reply('AI tidak memberi jawaban. Coba lagi nanti.');
+    return ctx.reply('💡 Tips hemat bulan ini:\n\n' + tips);
+  } catch (err) {
+    logError('Gagal membuat tips.', err);
+    return ctx.reply('Gagal membuat tips.');
   }
 });
 
@@ -3524,6 +3725,52 @@ async function processTransactionText(ctx, text) {
 }
 
 async function handleKeywordText(ctx, text) {
+  // kategori map <kata> <Induk>  |  kategori unmap <kata>  |  kategori map (lihat)
+  if (/^kategori\s+(map|unmap)\b/i.test(text)) {
+    const isUnmap = /^kategori\s+unmap\b/i.test(text);
+    const rest = text.replace(/^kategori\s+(map|unmap)\s*/i, '').trim();
+
+    if (isUnmap) {
+      if (!rest) {
+        await ctx.reply('Format: kategori unmap <kata>\nContoh: kategori unmap rokok');
+        return true;
+      }
+      const ok = await removeCategoryMap(rest);
+      await ctx.reply(ok ? `Pemetaan "${rest}" dihapus.` : `Pemetaan "${rest}" tidak ditemukan.`);
+      return true;
+    }
+
+    if (!rest) {
+      // tampilkan daftar pemetaan
+      if (customCategoryRules.length === 0) {
+        await ctx.reply(
+          'Belum ada pemetaan kategori custom.\n' +
+          'Tambah: kategori map <kata> <Induk>\n' +
+          'Contoh: kategori map rokok Pribadi'
+        );
+      } else {
+        const lines = ['Pemetaan kategori custom:', ''];
+        for (const [k, v] of customCategoryRules) lines.push(`- ${k} → ${v}`);
+        lines.push('');
+        lines.push('Hapus: kategori unmap <kata>');
+        await ctx.reply(lines.join('\n'));
+      }
+      return true;
+    }
+
+    const m = rest.match(/^(.+)\s+(\S+)$/);
+    if (!m) {
+      await ctx.reply('Format: kategori map <kata> <Induk>\nContoh: kategori map rokok Pribadi');
+      return true;
+    }
+    const r = await addCategoryMap(m[1].trim(), m[2].trim());
+    await ctx.reply(
+      `Tersimpan: item mengandung "${r.keyword}" → kategori ${r.kategori}.\n` +
+      'Berlaku untuk transaksi berikutnya.'
+    );
+    return true;
+  }
+
   // budget <kategori> <nominal>  |  budget hapus <kategori>
   if (/^budget\s+/i.test(text)) {
     const rest = text.replace(/^budget\s+/i, '').trim();
@@ -3969,6 +4216,7 @@ async function registerBotCommands() {
       { command: 'analisa', description: 'Analisa lengkap + grafik' },
       { command: 'budget', description: 'Lihat budget & pemakaian' },
       { command: 'kategori', description: 'Rincian item per kategori' },
+      { command: 'tips', description: 'Saran hemat dari AI' },
       { command: 'target', description: 'Lihat target tabungan' },
       { command: 'langganan', description: 'Kelola tagihan rutin' },
       { command: 'hutang', description: 'Catatan hutang & piutang' },
@@ -3988,6 +4236,7 @@ logInfo('Started bot...');
 
 bot.launch().then(() => {
   registerBotCommands();
+  loadCustomCategoryRules();
 }).catch((err) => {
   logError('Launch error:', err);
 });

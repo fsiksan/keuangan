@@ -145,6 +145,7 @@ node rekap.js
 | /laporan [MM YYYY] | Laporan + grafik + proyeksi + anomali (kirim gambar chart) |
 | /analisa | Analisa lengkap + grafik di Sheet |
 | /kategori | Rincian item per kategori (bulan ini) |
+| /tips | Saran hemat dari AI berdasarkan data bulan ini |
 | /budget | Lihat budget per kategori & pemakaian bulan ini |
 | /target | Lihat target tabungan & progress |
 | /langganan | Kelola tagihan rutin (tambah/hapus/jalan) |
@@ -252,7 +253,19 @@ Reminder & langganan otomatis dikirim ke semua user tersebut.
 otomatis (mis. `Transportasi`). Rekap & analisa memakai data **Kategori**;
 gunakan `/kategori` untuk melihat rincian item di tiap kategori.
 
-Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Hutang**, **Analisa**.
+### Atur kategori sendiri (custom mapping)
+
+Kalau pengelompokan otomatis kurang pas, ajari botnya:
+```
+kategori map rokok Pribadi      # item "rokok" -> kategori Pribadi
+kategori map kopi Jajan
+kategori unmap rokok            # hapus pemetaan
+kategori map                    # lihat semua pemetaan
+```
+Pemetaan custom diprioritaskan di atas aturan bawaan dan disimpan di sheet
+**KategoriMap**.
+
+Sheet tambahan otomatis: **Budget**, **Langganan**, **Target**, **Hutang**, **KategoriMap**, **Analisa**.
 
 ## Sheet Analisa (otomatis + grafik)
 
