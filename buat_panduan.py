@@ -194,6 +194,109 @@ class Guide:
         self._footer()
         self.c.save()
 
+    # ---- Google Sheets mockup ----
+    def sheet(self, tabname, headers, rows, weights=None, money_cols=None, note=None):
+        money_cols = money_cols or set()
+        ncol = len(headers)
+        gutter = 18
+        avail = CONTENT_W - gutter
+        if weights is None:
+            weights = [1] * ncol
+        s = sum(weights)
+        colw = [avail * w / s for w in weights]
+        table_w = gutter + sum(colw)
+        colhdr_h = 12
+        rowh = 15
+        ndata = len(rows)
+        total_h = 18 + colhdr_h + rowh * (1 + ndata)
+        self.need(total_h + (16 if note else 6))
+
+        x0 = MARGIN
+        top = self.y
+        # tab label
+        tlw = stringWidth(tabname, "Helvetica-Bold", 9) + 16
+        self.c.setFillColorRGB(*TEAL)
+        self.c.roundRect(x0, top - 14, tlw, 15, 3, fill=1, stroke=0)
+        self.c.setFillColorRGB(1, 1, 1)
+        self.c.setFont("Helvetica-Bold", 9)
+        self.c.drawString(x0 + 8, top - 11, clean(tabname))
+
+        gy = top - 18  # top of grid
+        letters = [chr(65 + i) for i in range(ncol)]
+
+        # column-letter band (gray)
+        self.c.setFillColorRGB(0.93, 0.93, 0.94)
+        self.c.rect(x0, gy - colhdr_h, table_w, colhdr_h, fill=1, stroke=0)
+        self.c.setFillColorRGB(0.45, 0.45, 0.47)
+        self.c.setFont("Helvetica", 6.5)
+        cx = x0 + gutter
+        for i in range(ncol):
+            self.c.drawCentredString(cx + colw[i] / 2, gy - colhdr_h + 3.5, letters[i])
+            cx += colw[i]
+
+        def trunc(txt, maxw, fs):
+            txt = clean(str(txt))
+            if stringWidth(txt, "Helvetica", fs) <= maxw:
+                return txt
+            while txt and stringWidth(txt + "...", "Helvetica", fs) > maxw:
+                txt = txt[:-1]
+            return txt + "..."
+
+        # grid rows: row 0 = header (green), rows 1.. = data
+        gridtop = gy - colhdr_h
+        all_rows = [headers] + rows
+        ry = gridtop
+        for ridx, row in enumerate(all_rows):
+            is_head = ridx == 0
+            # row-number gutter
+            self.c.setFillColorRGB(0.93, 0.93, 0.94)
+            self.c.rect(x0, ry - rowh, gutter, rowh, fill=1, stroke=0)
+            self.c.setFillColorRGB(0.45, 0.45, 0.47)
+            self.c.setFont("Helvetica", 6.5)
+            self.c.drawCentredString(x0 + gutter / 2, ry - rowh + 4, str(ridx + 1))
+            # cells
+            cx = x0 + gutter
+            for i in range(ncol):
+                if is_head:
+                    self.c.setFillColorRGB(*TEAL_D)
+                    self.c.rect(cx, ry - rowh, colw[i], rowh, fill=1, stroke=0)
+                    self.c.setFillColorRGB(1, 1, 1)
+                    self.c.setFont("Helvetica-Bold", 7)
+                else:
+                    self.c.setFillColorRGB(0.99, 0.99, 0.99)
+                    self.c.rect(cx, ry - rowh, colw[i], rowh, fill=1, stroke=0)
+                    self.c.setFillColorRGB(*INK)
+                    self.c.setFont("Helvetica", 7)
+                val = trunc(row[i] if i < len(row) else "", colw[i] - 6, 7)
+                if (i in money_cols) and not is_head:
+                    self.c.drawRightString(cx + colw[i] - 3, ry - rowh + 4.5, val)
+                else:
+                    self.c.drawString(cx + 3, ry - rowh + 4.5, val)
+                cx += colw[i]
+            ry -= rowh
+
+        # gridlines
+        self.c.setStrokeColorRGB(0.82, 0.82, 0.84)
+        self.c.setLineWidth(0.4)
+        bottom = ry
+        cx = x0
+        xs = [x0, x0 + gutter]
+        for w in colw:
+            xs.append(xs[-1] + w)
+        for xline in xs:
+            self.c.line(xline, gridtop, xline, bottom)
+        yy = gridtop
+        for _ in range(len(all_rows) + 1):
+            self.c.line(x0, yy, x0 + table_w, yy)
+            yy -= rowh
+        # adjust last line position
+        self.c.line(x0, bottom, x0 + table_w, bottom)
+
+        self.y = bottom - 6
+        if note:
+            self.para(note, size=8.5, color=GRAY, gap=8)
+
+
 
 g = Guide("panduan-bot-rekap-keuangan.pdf")
 c = g.c
@@ -437,6 +540,94 @@ g.bullet("Kategori 'makan'/'makanan'/'warung' otomatis jadi satu: Makanan. Gunak
 g.bullet("Untuk struk, gunakan model AI yang mendukung gambar (vision).")
 g.bullet("Jaga kerahasiaan token bot & API key - jangan dibagikan atau di-commit ke repo publik.")
 g.bullet("Jalankan /export secara berkala sebagai cadangan data.")
+
+# ---------------- 16. TAMPILAN GOOGLE SHEETS ----------------
+g.h1("16. Tampilan Google Sheets")
+g.para("Berikut contoh tampilan tiap sheet beserta struktur kolomnya. "
+       "(Ilustrasi - data nyata mengikuti transaksimu.)")
+
+g.h2("Sheet utama (transaksi)")
+g.sheet("Rekap",
+        ["Tanggal", "Item", "Kategori", "Toko", "Pemasukan", "Pengeluaran", "Catatan", "Pencatat", "Akun"],
+        [
+            ["5/6/2026", "gaji", "Gaji", "", "Rp5.000.000", "", "", "Suami", "Kas"],
+            ["5/6/2026", "makan", "Makanan", "warung agam", "", "Rp25.000", "makan siang", "Suami", "Gopay"],
+            ["5/6/2026", "bensin", "Transportasi", "SPBU", "", "Rp50.000", "", "Istri", "Bank Bca"],
+            ["6/6/2026", "belanja", "Kebutuhan Pokok", "Indomaret", "", "Rp120.000", "", "Istri", "Bank Bca"],
+        ],
+        weights=[1.0, 1.0, 1.3, 1.3, 1.2, 1.2, 1.2, 1.0, 1.0],
+        money_cols={4, 5})
+
+g.h2("Sheet Analisa")
+g.sheet("Analisa",
+        ["Keterangan", "Nilai", "Persentase"],
+        [
+            ["ANALISA KEUANGAN", "", ""],
+            ["Total Pemasukan", "Rp5.000.000", ""],
+            ["Total Pengeluaran", "Rp195.000", ""],
+            ["Saldo", "Rp4.805.000", ""],
+            ["PENGELUARAN PER KATEGORI", "", ""],
+            ["Kebutuhan Pokok", "Rp120.000", "61.5%"],
+            ["Transportasi", "Rp50.000", "25.6%"],
+            ["Makanan", "Rp25.000", "12.8%"],
+        ],
+        weights=[1.6, 1.0, 0.8], money_cols={1},
+        note="Dilengkapi grafik: pie Pemasukan vs Pengeluaran, pie per Kategori/Toko/Pencatat, dan bar per Bulan.")
+
+g.h2("Sheet Budget")
+g.sheet("Budget",
+        ["Kategori", "Budget Bulanan", "Terpakai (bln ini)", "Sisa"],
+        [
+            ["Makanan", "Rp1.000.000", "Rp25.000", "Rp975.000"],
+            ["Transportasi", "Rp500.000", "Rp50.000", "Rp450.000"],
+            ["Kebutuhan Pokok", "Rp1.500.000", "Rp120.000", "Rp1.380.000"],
+        ],
+        weights=[1.2, 1.0, 1.0, 1.0], money_cols={1, 2, 3},
+        note="Dilengkapi grafik kolom Budget vs Terpakai per kategori.")
+
+g.h2("Sheet Neraca")
+g.sheet("Neraca",
+        ["Tipe", "Nama", "Nilai", "Sumber"],
+        [
+            ["Aset", "Kas", "Rp1.200.000", "auto"],
+            ["Aset", "Bank Bca", "Rp5.000.000", "auto"],
+            ["Aset", "Gopay", "Rp300.000", "auto"],
+            ["Aset", "Emas", "Rp10.000.000", "manual"],
+            ["Liabilitas", "KPR", "Rp100.000.000", "manual"],
+        ],
+        weights=[0.9, 1.4, 1.2, 0.8], money_cols={2},
+        note="Baris 'auto' = saldo akun otomatis. Dilengkapi grafik Aset vs Liabilitas vs Ekuitas.")
+
+g.h2("Sheet Langganan")
+g.sheet("Langganan",
+        ["Nama", "Kategori", "Toko", "Nominal", "Tanggal Tagih", "Catatan", "Jenis"],
+        [
+            ["Netflix", "Hiburan", "Lainnya", "Rp54.000", "1", "", "pengeluaran"],
+            ["Gaji", "Gaji", "", "Rp5.000.000", "25", "", "pemasukan"],
+        ],
+        weights=[1.0, 1.0, 0.9, 1.0, 1.1, 0.9, 1.1], money_cols={3})
+
+g.h2("Sheet Target")
+g.sheet("Target",
+        ["Nama", "Target", "Terkumpul"],
+        [["liburan", "Rp5.000.000", "Rp500.000"], ["dana darurat", "Rp10.000.000", "Rp3.000.000"]],
+        weights=[1.2, 1.0, 1.0], money_cols={1, 2})
+
+g.h2("Sheet Hutang")
+g.sheet("Hutang",
+        ["Nama", "Jenis", "Nominal", "Catatan", "Tanggal"],
+        [
+            ["budi", "Hutang", "Rp200.000", "", "5/6/2026"],
+            ["andi", "Piutang", "Rp150.000", "pinjam tunai", "5/6/2026"],
+        ],
+        weights=[1.0, 0.9, 1.1, 1.3, 1.0], money_cols={2})
+
+g.h2("Sheet KategoriMap")
+g.sheet("KategoriMap",
+        ["Kata Kunci", "Kategori"],
+        [["rokok", "Pribadi"], ["kopi", "Jajan"]],
+        weights=[1.0, 1.0],
+        note="Pemetaan kategori custom buatanmu (lihat bab 11).")
 
 g.save()
 print("PDF dibuat: panduan-bot-rekap-keuangan.pdf")
