@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rekap Keuangan — Catat keuangan cukup dari chat Telegram</title>
+<meta name="description" content="Bot Telegram untuk mencatat keuangan otomatis ke Google Sheets. Foto struk, catat lewat suara, budget, target, neraca, laporan & grafik." />
+<style>
+  :root{
+    --green:#2E7D5B; --green-d:#1F5B41; --green-l:#8ED1A6;
+    --cream:#F4F1EA; --ink:#1f2a24; --muted:#5b6b62;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);line-height:1.6;background:#fff}
+  .wrap{max-width:980px;margin:0 auto;padding:0 20px}
+  a{color:inherit}
+  .btn{display:inline-block;padding:14px 26px;border-radius:999px;font-weight:700;text-decoration:none;transition:.15s}
+  .btn-primary{background:var(--green);color:#fff}
+  .btn-primary:hover{background:var(--green-d)}
+  .btn-out{border:2px solid var(--green);color:var(--green);background:#fff}
+  .btn-wa{background:#25D366;color:#fff}
+  /* hero */
+  header{background:linear-gradient(160deg,var(--green) 0%,var(--green-d) 100%);color:#fff;padding:64px 0 72px;text-align:center}
+  header .badge{display:inline-block;background:rgba(255,255,255,.15);padding:6px 14px;border-radius:999px;font-size:14px;margin-bottom:18px}
+  header h1{font-size:42px;line-height:1.15;margin-bottom:16px}
+  header p{font-size:19px;opacity:.95;max-width:620px;margin:0 auto 28px}
+  .cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+  .hero-note{margin-top:16px;font-size:14px;opacity:.85}
+  /* sections */
+  section{padding:56px 0}
+  h2{font-size:30px;text-align:center;margin-bottom:8px;color:var(--green-d)}
+  .sub{text-align:center;color:var(--muted);margin-bottom:36px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px}
+  .card{background:var(--cream);border-radius:16px;padding:22px}
+  .card h3{font-size:18px;margin-bottom:6px;color:var(--green-d)}
+  .card p{color:var(--muted);font-size:15px}
+  .chip{font-size:26px}
+  /* steps */
+  .steps{counter-reset:s;max-width:680px;margin:0 auto;display:grid;gap:14px}
+  .step{display:flex;gap:16px;align-items:flex-start;background:#fff;border:1px solid #e7ece9;border-radius:14px;padding:16px 18px}
+  .step .n{flex:0 0 36px;height:36px;border-radius:50%;background:var(--green);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center}
+  /* pricing */
+  .price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px;max-width:840px;margin:0 auto}
+  .price{border:2px solid #e7ece9;border-radius:18px;padding:26px;text-align:center;position:relative;background:#fff}
+  .price.best{border-color:var(--green);box-shadow:0 10px 30px rgba(46,125,91,.15)}
+  .price .tag{position:absolute;top:-13px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px}
+  .price .amt{font-size:34px;font-weight:800;color:var(--green-d);margin:10px 0}
+  .price .per{color:var(--muted);font-size:14px}
+  .price ul{list-style:none;text-align:left;margin:16px 0;font-size:14px;color:var(--muted)}
+  .price li{padding:4px 0}
+  /* faq */
+  .faq{max-width:740px;margin:0 auto}
+  details{background:var(--cream);border-radius:12px;padding:14px 18px;margin-bottom:10px}
+  summary{font-weight:700;cursor:pointer;color:var(--green-d)}
+  details p{margin-top:8px;color:var(--muted)}
+  footer{background:var(--ink);color:#cfe0d7;text-align:center;padding:34px 0;font-size:14px}
+  footer a{color:#fff;text-decoration:none;margin:0 8px;font-weight:600}
+  @media(max-width:600px){header h1{font-size:32px}h2{font-size:25px}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="badge">Asisten keuangan di Telegram</span>
+    <h1>Catat keuangan cukup dari chat 💬</h1>
+    <p>Ketik “keluar makan 25rb”, otomatis rapi ke Google Sheets — lengkap dengan laporan, grafik, budget, sampai neraca. Tanpa install aplikasi baru.</p>
+    <div class="cta-row">
+      <a class="btn btn-wa" href="https://wa.me/62XXXXXXXXXX" target="_blank">Pesan via WhatsApp</a>
+      <a class="btn btn-out" style="background:#fff" href="https://instagram.com/rekapkeuangan" target="_blank">DM Instagram</a>
+    </div>
+    <div class="hero-note">Setup dibantu sampai jalan • Cocok untuk pribadi & pasangan</div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>Kenapa Rekap Keuangan?</h2>
+    <p class="sub">Karena pencatatan yang gampang = yang konsisten kamu lakukan.</p>
+    <div class="grid">
+      <div class="card"><div class="chip">💬</div><h3>Semudah chat</h3><p>Catat seperti ngobrol. Tidak ada form rumit.</p></div>
+      <div class="card"><div class="chip">🧾</div><h3>Foto struk (AI)</h3><p>Jepret struk, otomatis terbaca: toko, total, kategori.</p></div>
+      <div class="card"><div class="chip">🎙️</div><h3>Pakai suara</h3><p>Malas ngetik? Kirim voice note, langsung dicatat.</p></div>
+      <div class="card"><div class="chip">🔔</div><h3>Budget & alarm</h3><p>Dapat peringatan saat pengeluaran mendekati batas.</p></div>
+      <div class="card"><div class="chip">🎯</div><h3>Target nabung</h3><p>Pantau progress targetmu dengan progress bar.</p></div>
+      <div class="card"><div class="chip">🏦</div><h3>Neraca & akun</h3><p>Aset, utang, kekayaan bersih, saldo tiap dompet.</p></div>
+      <div class="card"><div class="chip">📊</div><h3>Laporan & grafik</h3><p>Harian, bulanan, analisa otomatis di Google Sheets.</p></div>
+      <div class="card"><div class="chip">👨‍👩‍👧</div><h3>Bisa berdua</h3><p>Suami-istri satu catatan keuangan keluarga.</p></div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--cream)">
+  <div class="wrap">
+    <h2>Cara mulai</h2>
+    <p class="sub">Hanya butuh beberapa menit.</p>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><div><b>Pesan & bayar</b><br>DM Instagram / WhatsApp, pilih paket, lakukan pembayaran.</div></div>
+      <div class="step"><div class="n">2</div><div><b>Gabung grup Telegram</b><br>Untuk verifikasi & support. <a href="https://t.me/+D5IRzFMN2mM5NzM1" target="_blank">Join grup »</a></div></div>
+      <div class="step"><div class="n">3</div><div><b>Isi data singkat</b><br>Nama & email Google (untuk akses Sheet) lewat form onboarding.</div></div>
+      <div class="step"><div class="n">4</div><div><b>Akun aktif</b><br>Kami siapkan Sheet & bot kamu. Langsung bisa mulai mencatat 🎉</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Harga</h2>
+    <p class="sub">Sekali setup, dipakai terus. Pilih yang paling pas.</p>
+    <div class="price-grid">
+      <div class="price">
+        <h3>Bulanan</h3>
+        <div class="amt">Rp19.000</div><div class="per">/ bulan</div>
+        <ul><li>✅ Semua fitur</li><li>✅ Setup dibantu</li><li>✅ Support grup</li></ul>
+        <a class="btn btn-out" href="https://wa.me/62XXXXXXXXXX">Pilih</a>
+      </div>
+      <div class="price best">
+        <span class="tag">PALING HEMAT</span>
+        <h3>Tahunan</h3>
+        <div class="amt">Rp99.000</div><div class="per">/ tahun (~Rp8rb/bln)</div>
+        <ul><li>✅ Semua fitur</li><li>✅ Setup dibantu</li><li>✅ Prioritas support</li></ul>
+        <a class="btn btn-primary" href="https://wa.me/62XXXXXXXXXX">Pilih</a>
+      </div>
+      <div class="price">
+        <span class="tag">EARLY BIRD</span>
+        <h3>Lifetime</h3>
+        <div class="amt">Rp149.000</div><div class="per">sekali bayar (normal Rp199rb)</div>
+        <ul><li>✅ Semua fitur</li><li>✅ Selamanya</li><li>✅ 50 pembeli pertama</li></ul>
+        <a class="btn btn-primary" href="https://wa.me/62XXXXXXXXXX">Pilih</a>
+      </div>
+    </div>
+    <p class="sub" style="margin-top:18px;font-size:14px">Tambah pasangan (suami-istri, 1 catatan): +Rp50.000</p>
+  </div>
+</section>
+
+<section style="background:var(--cream)">
+  <div class="wrap">
+    <h2>Tanya Jawab</h2>
+    <div class="faq">
+      <details><summary>Perlu install aplikasi?</summary><p>Tidak. Cukup pakai Telegram yang sudah ada di HP-mu.</p></details>
+      <details><summary>Data saya aman?</summary><p>Data tersimpan di Google Sheets yang kami bagikan ke email kamu sebagai Editor — kamu punya akses penuh dan bisa ekspor kapan saja.</p></details>
+      <details><summary>Bagaimana cara bayar?</summary><p>QRIS, transfer bank, atau e-wallet (DANA/OVO/GoPay). Detail diberikan saat kamu DM.</p></details>
+      <details><summary>Bisa dipakai berdua?</summary><p>Bisa. Cocok untuk suami-istri: dua orang, satu catatan keuangan keluarga.</p></details>
+      <details><summary>Kalau bingung?</summary><p>Ada grup Telegram untuk support, plus panduan PDF lengkap.</p></details>
+    </div>
+  </div>
+</section>
+
+<section style="text-align:center">
+  <div class="wrap">
+    <h2>Siap atur keuangan tanpa ribet?</h2>
+    <p class="sub">Mulai hari ini.</p>
+    <div class="cta-row">
+      <a class="btn btn-wa" href="https://wa.me/62XXXXXXXXXX" target="_blank">Pesan via WhatsApp</a>
+      <a class="btn btn-primary" href="https://instagram.com/rekapkeuangan" target="_blank">DM Instagram</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div><b>Rekap Keuangan</b> — asisten keuangan di Telegram</div>
+    <div style="margin-top:10px">
+      <a href="https://instagram.com/rekapkeuangan" target="_blank">Instagram</a>·
+      <a href="https://wa.me/62XXXXXXXXXX" target="_blank">WhatsApp</a>·
+      <a href="https://t.me/+D5IRzFMN2mM5NzM1" target="_blank">Grup Telegram</a>
+    </div>
+    <div style="margin-top:12px;opacity:.6">© 2026 Rekap Keuangan</div>
+  </div>
+</footer>
+
+</body>
+</html>
