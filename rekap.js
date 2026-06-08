@@ -332,11 +332,12 @@ async function getAllEntries() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: ssId(),
-    range: `'${sheetName}'!A:I`,
+    range: `'${sheetName}'!A:J`,
   });
 
   const rows = res.data.values || [];
-  const dataRows = rows.slice(1);
+  // Baris 1 = judul, baris 2 = header, data mulai baris 3 (index 2).
+  const dataRows = rows.slice(2);
 
   const entries = [];
 
@@ -350,6 +351,7 @@ async function getAllEntries() {
     const catatan = row[6] || '';
     const pencatat = row[7] || '';
     const akun = (row[8] || '').trim() || 'Kas';
+    const id = row[9] || '';
 
     const parsedDate = parseDateParts(tanggal);
     if (!parsedDate) continue;
@@ -364,6 +366,7 @@ async function getAllEntries() {
       catatan,
       pencatat,
       akun,
+      id,
       parsedDate,
     });
   }
@@ -420,21 +423,38 @@ async function guardOwner(ctx) {
   return true;
 }
 
+const REKAP_TITLE = "Rekap Keuangan by Ikhsan Abdul Nafi'u";
+const REKAP_HEADER = [
+  'Tanggal', 'Item', 'Kategori', 'Toko', 'Pemasukan',
+  'Pengeluaran', 'Catatan', 'Pencatat', 'Akun', 'ID'
+];
+
+function genTxnId() {
+  return 'TRX-' + Date.now().toString(36).toUpperCase() +
+    Math.random().toString(36).slice(2, 4).toUpperCase();
+}
+
 async function appendRow(values) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
   const sheetName = getSheetName();
 
+  const row = values.slice();
+  if (row.length < 10 || !row[9]) row[9] = genTxnId();
+
+  // Append setelah header (baris 2); judul di baris 1 tidak terganggu.
   await sheets.spreadsheets.values.append({
     spreadsheetId: ssId(),
-    range: `'${sheetName}'!A:I`,
+    range: `'${sheetName}'!A2:J`,
     valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
     requestBody: {
-      values: [values],
+      values: [row],
     },
   });
 
   logInfo('Berhasil simpan ke spreadsheet.');
+  return row[9];
 }
 
 async function ensureHeader() {
@@ -444,39 +464,58 @@ async function ensureHeader() {
 
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: ssId(),
-    range: `'${sheetName}'!A1:I2`,
+    range: `'${sheetName}'!A1:J2`,
   });
 
   const values = res.data.values || [];
-  const header = values[0] || [];
+  const title = values[0] || [];
+  const header = values[1] || [];
 
+  // Deteksi layout lama: baris 1 berisi header ('Tanggal') tanpa baris judul.
+  // Sisipkan satu baris di atas agar data transaksi tidak tertimpa.
+  if (title[0] === 'Tanggal') {
+    const sheetId = await getSheetIdByName(sheetName);
+    if (sheetId != null) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: ssId(),
+        requestBody: {
+          requests: [{
+            insertDimension: {
+              range: { sheetId, dimension: 'ROWS', startIndex: 0, endIndex: 1 },
+              inheritFromBefore: false
+            }
+          }]
+        }
+      });
+    }
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: ssId(),
+      range: `'${sheetName}'!A1:J2`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [[REKAP_TITLE], REKAP_HEADER] }
+    });
+    return;
+  }
+
+  const needsTitle = title[0] !== REKAP_TITLE;
   const needsHeader =
-    values.length === 0 ||
     header[0] !== 'Tanggal' ||
     header[1] !== 'Item' ||
     header[2] !== 'Kategori' ||
     header[5] !== 'Pengeluaran' ||
-    header[6] !== 'Catatan' ||
-    header[7] !== 'Pencatat' ||
-    header[8] !== 'Akun';
+    header[8] !== 'Akun' ||
+    header[9] !== 'ID';
 
-  if (needsHeader) {
+  if (needsTitle || needsHeader) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: ssId(),
-      range: `'${sheetName}'!A1:I1`,
+      range: `'${sheetName}'!A1:J2`,
       valueInputOption: 'RAW',
       requestBody: {
-        values: [[
-          'Tanggal',
-          'Item',
-          'Kategori',
-          'Toko',
-          'Pemasukan',
-          'Pengeluaran',
-          'Catatan',
-          'Pencatat',
-          'Akun'
-        ]]
+        values: [
+          [REKAP_TITLE],
+          REKAP_HEADER
+        ]
       }
     });
   }
@@ -500,324 +539,87 @@ async function formatSheetLayout() {
   }
 
   const sheetId = targetSheet.properties.sheetId;
-
   const valueRes = await sheets.spreadsheets.values.get({
     spreadsheetId: ssId(),
-    range: `'${sheetName}'!A:I`,
+    range: `'${sheetName}'!A:J`,
   });
-
   const values = valueRes.data.values || [];
-  const lastRow = Math.max(values.length, 1);
+  const lastRow = Math.max(values.length, 2);
+  const fontFam = getSheetFont();
+  const blackBorder = { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } };
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId: ssId(),
     requestBody: {
       requests: [
-        {
-          updateSheetProperties: {
-            properties: {
-              sheetId,
-              gridProperties: {
-                frozenRowCount: 1
-              }
-            },
-            fields: 'gridProperties.frozenRowCount'
-          }
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 0,
-              endRowIndex: 1,
-              startColumnIndex: 0,
-              endColumnIndex: 9
-            },
-            cell: {
-              userEnteredFormat: {
-                backgroundColor: {
-                  red: 0.84,
-                  green: 0.93,
-                  blue: 0.88
-                },
-                textFormat: {
-                  bold: true,
-                  fontSize: 12
-                },
-                horizontalAlignment: 'CENTER',
-                verticalAlignment: 'MIDDLE'
-              }
-            },
-            fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.fontSize,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
-          }
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: lastRow,
-              startColumnIndex: 0,
-              endColumnIndex: 1
-            },
-            cell: {
-              userEnteredFormat: {
-                textFormat: {
-                  fontSize: 12
-                },
-                horizontalAlignment: 'CENTER',
-                verticalAlignment: 'MIDDLE'
-              }
-            },
-            fields: 'userEnteredFormat.textFormat.fontSize,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
-          }
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: lastRow,
-              startColumnIndex: 1,
-              endColumnIndex: 4
-            },
-            cell: {
-              userEnteredFormat: {
-                textFormat: {
-                  fontSize: 12
-                },
-                horizontalAlignment: 'LEFT',
-                verticalAlignment: 'MIDDLE'
-              }
-            },
-            fields: 'userEnteredFormat.textFormat.fontSize,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
-          }
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: lastRow,
-              startColumnIndex: 4,
-              endColumnIndex: 6
-            },
-            cell: {
-              userEnteredFormat: {
-                textFormat: {
-                  fontSize: 12
-                },
-                horizontalAlignment: 'RIGHT',
-                verticalAlignment: 'MIDDLE'
-              }
-            },
-            fields: 'userEnteredFormat.textFormat.fontSize,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
-          }
-        },
-        {
-          repeatCell: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: lastRow,
-              startColumnIndex: 6,
-              endColumnIndex: 9
-            },
-            cell: {
-              userEnteredFormat: {
-                textFormat: {
-                  fontSize: 12
-                },
-                horizontalAlignment: 'LEFT',
-                verticalAlignment: 'MIDDLE'
-              }
-            },
-            fields: 'userEnteredFormat.textFormat.fontSize,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
-          }
-        },
-        {
-          setBasicFilter: {
-            filter: {
-              range: {
-                sheetId,
-                startRowIndex: 0,
-                endRowIndex: lastRow,
-                startColumnIndex: 0,
-                endColumnIndex: 9
-              }
-            }
-          }
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: 'COLUMNS',
-              startIndex: 0,
-              endIndex: 1
-            },
-            properties: {
-              pixelSize: 100
-            },
-            fields: 'pixelSize'
-          }
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: 'COLUMNS',
-              startIndex: 1,
-              endIndex: 2
-            },
-            properties: {
-              pixelSize: 150
-            },
-            fields: 'pixelSize'
-          }
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: 'COLUMNS',
-              startIndex: 2,
-              endIndex: 4
-            },
-            properties: {
-              pixelSize: 140
-            },
-            fields: 'pixelSize'
-          }
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: 'COLUMNS',
-              startIndex: 4,
-              endIndex: 6
-            },
-            properties: {
-              pixelSize: 130
-            },
-            fields: 'pixelSize'
-          }
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: 'COLUMNS',
-              startIndex: 6,
-              endIndex: 7
-            },
-            properties: {
-              pixelSize: 200
-            },
-            fields: 'pixelSize'
-          }
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: 'COLUMNS',
-              startIndex: 7,
-              endIndex: 8
-            },
-            properties: {
-              pixelSize: 110
-            },
-            fields: 'pixelSize'
-          }
-        },
-        {
-          updateDimensionProperties: {
-            range: {
-              sheetId,
-              dimension: 'COLUMNS',
-              startIndex: 8,
-              endIndex: 9
-            },
-            properties: {
-              pixelSize: 120
-            },
-            fields: 'pixelSize'
-          }
-        },
-        {
-          updateBorders: {
-            range: {
-              sheetId,
-              startRowIndex: 0,
-              endRowIndex: lastRow,
-              startColumnIndex: 0,
-              endColumnIndex: 9
-            },
-            top: {
-              style: 'SOLID',
-              width: 1,
-              color: { red: 0, green: 0, blue: 0 }
-            },
-            bottom: {
-              style: 'SOLID',
-              width: 1,
-              color: { red: 0, green: 0, blue: 0 }
-            },
-            left: {
-              style: 'SOLID',
-              width: 1,
-              color: { red: 0, green: 0, blue: 0 }
-            },
-            right: {
-              style: 'SOLID',
-              width: 1,
-              color: { red: 0, green: 0, blue: 0 }
-            },
-            innerHorizontal: {
-              style: 'SOLID',
-              width: 1,
-              color: { red: 0, green: 0, blue: 0 }
-            },
-            innerVertical: {
-              style: 'SOLID',
-              width: 1,
-              color: { red: 0, green: 0, blue: 0 }
-            }
-          }
-        }
+        { mergeCells: { range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 10 }, mergeType: 'MERGE_ALL' } },
+        { repeatCell: {
+          range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 10 },
+          cell: { userEnteredFormat: { backgroundColor: { red: 0.18, green: 0.49, blue: 0.36 }, textFormat: { bold: true, fontSize: 14, foregroundColor: { red: 1, green: 1, blue: 1 }, fontFamily: fontFam }, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
+          fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
+        } },
+        { repeatCell: {
+          range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 0, endColumnIndex: 10 },
+          cell: { userEnteredFormat: { backgroundColor: { red: 0.84, green: 0.93, blue: 0.88 }, textFormat: { bold: true, fontSize: 11, fontFamily: fontFam }, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
+          fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.fontFamily,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
+        } },
+        { repeatCell: {
+          range: { sheetId, startRowIndex: 2, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 1 },
+          cell: { userEnteredFormat: { textFormat: { fontSize: 11, fontFamily: fontFam }, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
+          fields: 'userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.fontFamily,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
+        } },
+        { repeatCell: {
+          range: { sheetId, startRowIndex: 2, endRowIndex: lastRow, startColumnIndex: 1, endColumnIndex: 4 },
+          cell: { userEnteredFormat: { textFormat: { fontSize: 11, fontFamily: fontFam }, horizontalAlignment: 'LEFT', verticalAlignment: 'MIDDLE' } },
+          fields: 'userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.fontFamily,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
+        } },
+        { repeatCell: {
+          range: { sheetId, startRowIndex: 2, endRowIndex: lastRow, startColumnIndex: 4, endColumnIndex: 6 },
+          cell: { userEnteredFormat: { textFormat: { fontSize: 11, fontFamily: fontFam }, horizontalAlignment: 'RIGHT', verticalAlignment: 'MIDDLE' } },
+          fields: 'userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.fontFamily,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
+        } },
+        { repeatCell: {
+          range: { sheetId, startRowIndex: 2, endRowIndex: lastRow, startColumnIndex: 6, endColumnIndex: 10 },
+          cell: { userEnteredFormat: { textFormat: { fontSize: 11, fontFamily: fontFam }, horizontalAlignment: 'LEFT', verticalAlignment: 'MIDDLE' } },
+          fields: 'userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.fontFamily,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
+        } },
+        { updateSheetProperties: { properties: { sheetId, gridProperties: { frozenRowCount: 2 } }, fields: 'gridProperties.frozenRowCount' } },
+        { setBasicFilter: { filter: { range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 10 } } } },
+        { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 }, properties: { pixelSize: 95 }, fields: 'pixelSize' } },
+        { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 4 }, properties: { pixelSize: 130 }, fields: 'pixelSize' } },
+        { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 4, endIndex: 6 }, properties: { pixelSize: 120 }, fields: 'pixelSize' } },
+        { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 6, endIndex: 8 }, properties: { pixelSize: 140 }, fields: 'pixelSize' } },
+        { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 8, endIndex: 9 }, properties: { pixelSize: 100 }, fields: 'pixelSize' } },
+        { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 9, endIndex: 10 }, properties: { pixelSize: 130 }, fields: 'pixelSize' } },
+        { updateBorders: {
+          range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 10 },
+          top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder, innerHorizontal: blackBorder, innerVertical: blackBorder
+        } }
       ]
     }
   });
 
-  // Kolom bantu TERSEMBUNYI untuk filter periode di sheet Analisa:
-  // K=bulan, L=tahun, M=pemasukan(angka), N=pengeluaran(angka).
+  // Kolom bantu TERSEMBUNYI (K=bulan, L=tahun, M=pemNum, N=pengNum). Data mulai baris 3.
   try {
-    const dataRows = values.slice(1);
+    const dataRows = values.slice(2);
     const helper = dataRows.map((r) => {
       const d = parseDateParts(r[0] || '');
-      return [
-        d ? d.month : '',
-        d ? d.year : '',
-        parseRupiahTextToNumber(r[4] || ''),
-        parseRupiahTextToNumber(r[5] || '')
-      ];
+      return [d ? d.month : '', d ? d.year : '', parseRupiahTextToNumber(r[4] || ''), parseRupiahTextToNumber(r[5] || '')];
     });
     await sheets.spreadsheets.values.update({
       spreadsheetId: ssId(),
-      range: `'${sheetName}'!K1:N1`,
+      range: `'${sheetName}'!K2:N2`,
       valueInputOption: 'RAW',
       requestBody: { values: [['_bln', '_thn', '_pemNum', '_pengNum']] }
     });
     await sheets.spreadsheets.values.clear({
       spreadsheetId: ssId(),
-      range: `'${sheetName}'!K2:N100000`
+      range: `'${sheetName}'!K3:N100000`
     });
     if (helper.length > 0) {
       await sheets.spreadsheets.values.update({
         spreadsheetId: ssId(),
-        range: `'${sheetName}'!K2`,
+        range: `'${sheetName}'!K3`,
         valueInputOption: 'RAW',
         requestBody: { values: helper }
       });
@@ -976,7 +778,7 @@ async function updateAnalisaSheet() {
   const yearVals = Array.from(yearSet).filter((y) => y >= 2000).sort((a, b) => b - a);
 
   const S = formulaSep;
-  const rng = (col) => `'${mainSheet}'!${col}2:${col}100000`;
+  const rng = (col) => `'${mainSheet}'!${col}3:${col}100000`;
 
   // Bangun baris sambil mencatat posisi (index 0-based) untuk acuan grafik.
   const rows = [];
@@ -1925,35 +1727,64 @@ async function refreshBudgetSheet(month, year) {
   const dataRows = rows.filter((r) => (r[0] || '').trim());
   if (dataRows.length === 0) return;
 
-  // Hitung pemakaian per kategori bulan ini.
+  // Sheet sumber data (Rekap) + pemisah argumen rumus mengikuti locale.
+  const mainSheet = getSheetName();
+  const now = new Date();
+  const curMonthNow = Number(now.toLocaleDateString('en-US', { timeZone: getTimezone(), month: 'numeric' }));
+  const curYearNow = Number(now.toLocaleDateString('en-US', { timeZone: getTimezone(), year: 'numeric' }));
+  let formulaSep = ',';
+  let selBulan = Number.isInteger(month) ? month : curMonthNow;
+  let selTahun = Number.isInteger(year) ? year : curYearNow;
+  try {
+    const metaL = await sheets.spreadsheets.get({ spreadsheetId: ssId(), fields: 'properties.locale' });
+    const loc = (metaL.data.properties && metaL.data.properties.locale) || 'en_US';
+    if (!/^en/i.test(loc)) formulaSep = ';';
+  } catch (e) {}
+  // Pertahankan pilihan periode sebelumnya (F2 = bulan, H2 = tahun).
+  try {
+    const prev = await sheets.spreadsheets.values.get({ spreadsheetId: ssId(), range: `'${sheetName}'!F2:H2` });
+    const pv = (prev.data.values && prev.data.values[0]) || [];
+    const pb = Number(pv[0]); const py = Number(pv[2]);
+    if (Number.isInteger(pb) && pb >= 1 && pb <= 12) selBulan = pb;
+    if (Number.isInteger(py) && py >= 2000) selTahun = py;
+  } catch (e) {}
+  // Daftar tahun untuk dropdown: dari data + tahun berjalan.
   const entries = await getAllEntries();
-  const spent = {};
-  for (const e of entries) {
-    if (e.pengeluaran > 0 && e.parsedDate.month === month && e.parsedDate.year === year) {
-      const k = normalizeCategory(e.kategori, 'pengeluaran');
-      spent[k] = (spent[k] || 0) + e.pengeluaran;
-    }
-  }
+  const yearSet = new Set([curYearNow, selTahun]);
+  for (const e of entries) { if (e.parsedDate && e.parsedDate.year >= 2000) yearSet.add(e.parsedDate.year); }
+  const yearVals = Array.from(yearSet).filter((y) => y >= 2000).sort((a, b) => b - a);
 
-  const cd = dataRows.map((r) => {
-    const kat = normalizeCategory((r[0] || '').trim(), 'pengeluaran');
-    const budget = parseRupiahTextToNumber(r[1] || '');
-    const terpakai = spent[kat] || 0;
-    return [terpakai, budget - terpakai];
+  const S = formulaSep;
+  const rng = (col) => `'${mainSheet}'!${col}3:${col}100000`;
+
+  // Terpakai (C) & Sisa (D) sebagai rumus live mengikuti dropdown periode + kolom bantu Rekap.
+  const cd = dataRows.map((_r, i) => {
+    const r = i + 2; // baris sheet (data mulai baris 2)
+    return [
+      `=SUMIFS(${rng('N')}${S}${rng('K')}${S}$F$2${S}${rng('L')}${S}$H$2${S}${rng('C')}${S}$A${r})`,
+      `=B${r}-C${r}`
+    ];
   });
 
-  // Header C1:D1 + nilai C2:D
+  // Header C1:D1 + rumus C2:D
   await sheets.spreadsheets.values.update({
     spreadsheetId: ssId(),
     range: `'${sheetName}'!C1:D1`,
     valueInputOption: 'RAW',
-    requestBody: { values: [['Terpakai (bln ini)', 'Sisa']] }
+    requestBody: { values: [['Terpakai (periode)', 'Sisa']] }
   });
   await sheets.spreadsheets.values.update({
     spreadsheetId: ssId(),
     range: `'${sheetName}'!C2:D${dataRows.length + 1}`,
-    valueInputOption: 'RAW',
+    valueInputOption: 'USER_ENTERED',
     requestBody: { values: cd }
+  });
+  // Panel periode di samping (E1:H2) agar tabel A:D tidak bergeser.
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: ssId(),
+    range: `'${sheetName}'!E1:H2`,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [['PERIODE (pilih bulan & tahun)', '', '', ''], ['Bulan', selBulan, 'Tahun', selTahun]] }
   });
 
   const lastRow = dataRows.length + 1;
@@ -2000,6 +1831,72 @@ async function refreshBudgetSheet(month, year) {
   requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 }, properties: { pixelSize: 150 }, fields: 'pixelSize' } });
   requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 4 }, properties: { pixelSize: 140 }, fields: 'pixelSize' } });
 
+  // ----- Panel periode (dropdown bulan & tahun) di E1:H2 -----
+  // Judul panel E1:H1
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 4, endColumnIndex: 8 },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 0.18, green: 0.49, blue: 0.36 },
+          textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 }, fontFamily: font }
+        }
+      },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat'
+    }
+  });
+  requests.push({ mergeCells: { range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 4, endColumnIndex: 8 }, mergeType: 'MERGE_ALL' } });
+  // Label "Bulan" (E2) & "Tahun" (G2)
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 4, endColumnIndex: 5 },
+      cell: { userEnteredFormat: { textFormat: { bold: true, fontFamily: font } } },
+      fields: 'userEnteredFormat.textFormat'
+    }
+  });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 6, endColumnIndex: 7 },
+      cell: { userEnteredFormat: { textFormat: { bold: true, fontFamily: font } } },
+      fields: 'userEnteredFormat.textFormat'
+    }
+  });
+  // Dropdown Bulan (F2)
+  requests.push({
+    setDataValidation: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 5, endColumnIndex: 6 },
+      rule: {
+        condition: { type: 'ONE_OF_LIST', values: Array.from({ length: 12 }, (_, i) => ({ userEnteredValue: String(i + 1) })) },
+        showCustomUi: true, strict: false
+      }
+    }
+  });
+  // Dropdown Tahun (H2)
+  requests.push({
+    setDataValidation: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 7, endColumnIndex: 8 },
+      rule: {
+        condition: { type: 'ONE_OF_LIST', values: yearVals.map((y) => ({ userEnteredValue: String(y) })) },
+        showCustomUi: true, strict: false
+      }
+    }
+  });
+  // Tonjolkan sel dropdown F2 & H2
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 5, endColumnIndex: 6 },
+      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true, fontFamily: font }, horizontalAlignment: 'CENTER' } },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment'
+    }
+  });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 7, endColumnIndex: 8 },
+      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true, fontFamily: font }, horizontalAlignment: 'CENTER' } },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment'
+    }
+  });
+
   // Grafik kolom: Budget vs Terpakai per kategori
   requests.push({
     addChart: {
@@ -2019,8 +1916,8 @@ async function refreshBudgetSheet(month, year) {
         },
         position: {
           overlayPosition: {
-            anchorCell: { sheetId, rowIndex: 1, columnIndex: 5 },
-            offsetXPixels: 5, offsetYPixels: 5, widthPixels: 480, heightPixels: 300
+            anchorCell: { sheetId, rowIndex: 3, columnIndex: 4 },
+            offsetXPixels: 5, offsetYPixels: 10, widthPixels: 480, heightPixels: 300
           }
         }
       }
@@ -2329,10 +2226,10 @@ async function deleteLastTransaction() {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: ssId(),
-    range: `'${sheetName}'!A:I`
+    range: `'${sheetName}'!A:J`
   });
   const rows = res.data.values || [];
-  if (rows.length <= 1) return null;
+  if (rows.length <= 2) return null; // hanya judul + header
   const lastIndex = rows.length - 1;
   const last = rows[lastIndex];
   const sheetId = await getSheetIdByName(sheetName);
@@ -2354,7 +2251,8 @@ async function deleteLastTransaction() {
     toko: last[3] || '',
     pemasukan: parseRupiahTextToNumber(last[4] || ''),
     pengeluaran: parseRupiahTextToNumber(last[5] || ''),
-    catatan: last[6] || ''
+    catatan: last[6] || '',
+    id: last[9] || ''
   };
 }
 
@@ -2364,12 +2262,12 @@ async function editLastTransaction(field, rawValue) {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: ssId(),
-    range: `'${sheetName}'!A:I`
+    range: `'${sheetName}'!A:J`
   });
   const rows = res.data.values || [];
-  if (rows.length <= 1) return null;
+  if (rows.length <= 2) return null;
 
-  const rowNum = rows.length; // baris terakhir (header di baris 1)
+  const rowNum = rows.length; // baris terakhir (judul=1, header=2)
   const last = rows[rows.length - 1];
   const isIncome = parseRupiahTextToNumber(last[4] || '') > 0;
   const type = isIncome ? 'pemasukan' : 'pengeluaran';
@@ -4488,17 +4386,18 @@ bot.command('export', async (ctx) => {
     const sheets = google.sheets({ version: 'v4', auth: client });
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: ssId(),
-      range: `'${getSheetName()}'!A:I`
+      range: `'${getSheetName()}'!A:J`
     });
     const rows = res.data.values || [];
-    if (rows.length <= 1) {
+    if (rows.length <= 2) {
       return ctx.reply('Belum ada data untuk diekspor.');
     }
 
-    let outRows = rows;
+    // Baris 1 = judul, baris 2 = header, data mulai baris 3.
+    const header = rows[1];
+    let outRows = rows.slice(1); // header + semua data
     if (month && year) {
-      const header = rows[0];
-      const filtered = rows.slice(1).filter((r) => {
+      const filtered = rows.slice(2).filter((r) => {
         const d = parseDateParts(r[0] || '');
         return d && d.month === month && d.year === year;
       });
@@ -4594,14 +4493,14 @@ async function runMigration() {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: ssId(),
-    range: `'${sheetName}'!A:I`
+    range: `'${sheetName}'!A:J`
   });
   const rows = res.data.values || [];
-  if (rows.length <= 1) return 0;
+  if (rows.length <= 2) return 0;
 
   const bcValues = [];
   let changed = 0;
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = 2; i < rows.length; i++) {
     const r = rows[i];
     const origItem = (r[1] || '').trim();
     const origKat = (r[2] || '').trim();
@@ -4614,7 +4513,7 @@ async function runMigration() {
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: ssId(),
-    range: `'${sheetName}'!B2:C${rows.length}`,
+    range: `'${sheetName}'!B3:C${rows.length}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: bcValues }
   });
@@ -4925,7 +4824,7 @@ async function processTransactionText(ctx, text) {
     const akun = parsed.akun || 'Kas';
     const tglRow = parsed.tanggal || todayStr;
 
-    await appendRow([
+    const txnId = await appendRow([
       tglRow,
       item,
       parsed.category,
@@ -4943,8 +4842,9 @@ async function processTransactionText(ctx, text) {
     const tokoLabel = toko ? ` | toko: ${toko}` : '';
     const akunLabel = akun && akun !== 'Kas' ? ` | 💳 ${akun}` : '';
     const noteLabel = parsed.catatan ? ` | #${parsed.catatan}` : '';
+    const idLabel = txnId ? ` | 🆔 ${txnId}` : '';
     successLines.push(
-      `${parsed.type} | ${itemLabel}${parsed.category}${tokoLabel}${akunLabel} | ${parsed.amountText}${noteLabel}`
+      `${parsed.type} | ${itemLabel}${parsed.category}${tokoLabel}${akunLabel} | ${parsed.amountText}${noteLabel}${idLabel}`
     );
   }
 
@@ -5383,7 +5283,7 @@ bot.on('callback_query', async (ctx) => {
       await ctx.answerCbQuery('Menyimpan...');
       await ensureHeader();
       const pengeluaran = 'Rp' + Math.round(pending.total).toLocaleString('id-ID');
-      await appendRow([
+      const receiptTxnId = await appendRow([
         pending.tanggal,
         pending.item || 'Belanja',
         pending.kategori,
@@ -5409,7 +5309,8 @@ bot.on('callback_query', async (ctx) => {
       } catch (e) {}
 
       try {
-        await ctx.editMessageText(buildReceiptSummary(pending) + '\n\nSip, struk dicatat ya 👌' + alert);
+        const idLine = receiptTxnId ? `\n🆔 ${receiptTxnId}` : '';
+        await ctx.editMessageText(buildReceiptSummary(pending) + '\n\nSip, struk dicatat ya 👌' + idLine + alert);
       } catch (e) {}
       return;
     }
