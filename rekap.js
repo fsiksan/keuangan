@@ -38,7 +38,32 @@ if (!config.ownerUserId) {
   throw new Error('ownerUserId di rekap.json belum diisi');
 }
 
-const bot = new Telegraf(config.botToken);
+// Opsi koneksi Telegram: dukung proxy & apiRoot custom bila Telegram diblokir
+// ISP/negara atau VPS tak bisa menjangkau api.telegram.org langsung.
+const telegramOptions = {};
+if (config.telegramApiRoot) telegramOptions.apiRoot = config.telegramApiRoot;
+const proxyUrl = config.proxyUrl || process.env.HTTPS_PROXY || process.env.https_proxy;
+if (proxyUrl) {
+  try {
+    let ProxyAgent;
+    if (/^socks/i.test(proxyUrl)) {
+      ({ SocksProxyAgent: ProxyAgent } = require('socks-proxy-agent'));
+    } else {
+      ({ HttpsProxyAgent: ProxyAgent } = require('https-proxy-agent'));
+    }
+    telegramOptions.agent = new ProxyAgent(proxyUrl);
+    logInfo('Memakai proxy untuk Telegram: ' + proxyUrl);
+  } catch (e) {
+    logError(
+      'proxyUrl diatur tapi paket proxy belum terpasang. Jalankan:\n' +
+      '  npm install https-proxy-agent socks-proxy-agent',
+      e
+    );
+  }
+}
+const bot = Object.keys(telegramOptions).length
+  ? new Telegraf(config.botToken, { telegram: telegramOptions })
+  : new Telegraf(config.botToken);
 
 const anthropicApiKey = config.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
 const anthropic = anthropicApiKey
@@ -5594,12 +5619,29 @@ async function registerBotCommands() {
 
 logInfo('Started bot...');
 
-bot.launch().then(() => {
-  registerBotCommands();
-  if (!isMultiTenant()) loadCustomCategoryRules();
-}).catch((err) => {
-  logError('Launch error:', err);
-});
+// Jalankan bot dengan auto-retry. Bila Telegram tak terjangkau (ETIMEDOUT),
+// bot tidak langsung mati — ia mencoba lagi dengan jeda bertambah (maks 60s).
+let launchAttempt = 0;
+async function startBot() {
+  launchAttempt += 1;
+  try {
+    await bot.launch();
+    launchAttempt = 0;
+    logInfo('Bot terhubung ke Telegram ✅');
+    registerBotCommands();
+    if (!isMultiTenant()) loadCustomCategoryRules();
+  } catch (err) {
+    const delay = Math.min(60000, 2000 * 2 ** Math.min(launchAttempt - 1, 5));
+    logError(
+      `Gagal terhubung ke Telegram (percobaan ${launchAttempt}). ` +
+      `Coba lagi dalam ${Math.round(delay / 1000)} detik. ` +
+      'Jika ETIMEDOUT: cek koneksi/firewall VPS atau atur "proxyUrl" di rekap.json.',
+      err
+    );
+    setTimeout(startBot, delay);
+  }
+}
+startBot();
 
 // Cek setiap menit
 setInterval(schedulerTick, 60 * 1000);

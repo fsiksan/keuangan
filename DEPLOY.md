@@ -114,3 +114,26 @@ pm2 flush                  # bersihkan log lama
 - **Zona waktu server** (opsional): `sudo timedatectl set-timezone Asia/Jakarta`.
 - **Auto-restart kalau crash**: sudah ditangani PM2. Tambah `--max-memory-restart 300M` bila perlu:
   `pm2 start rekap.js --name rekap-bot --max-memory-restart 300M`
+
+## 9. Error `ETIMEDOUT` / `getMe failed` saat start
+Artinya VPS tidak bisa menjangkau `api.telegram.org` (Telegram diblokir
+ISP/negara, firewall, atau DNS). Bot kini otomatis mencoba ulang, tapi tetap
+butuh jalan keluar:
+```bash
+# 1) Tes koneksi dari VPS
+curl -sS https://api.telegram.org/bot<TOKEN>/getMe   # harus balas JSON {"ok":true,...}
+ping -c3 api.telegram.org
+
+# 2) Jika diblokir, pakai proxy. Pasang paket lalu set proxyUrl di rekap.json:
+npm install https-proxy-agent socks-proxy-agent
+```
+Tambahkan salah satu di `rekap.json`:
+```json
+  "proxyUrl": "http://user:pass@ip-proxy:port"     // proxy HTTP/HTTPS
+  // atau
+  "proxyUrl": "socks5://user:pass@ip-proxy:port"   // proxy SOCKS5
+```
+Alternatif tanpa proxy: pakai mirror/Local Bot API Server lalu set
+`"telegramApiRoot": "https://alamat-mirror"` di `rekap.json`. Cara paling
+sederhana biasanya **ganti/pindah VPS ke region yang tidak memblokir Telegram**
+(mis. Singapura), atau aktifkan proxy/VPN di server.
