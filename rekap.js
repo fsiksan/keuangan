@@ -451,7 +451,7 @@ async function guardOwner(ctx) {
   return true;
 }
 
-const REKAP_TITLE = "Rekap Keuangan by Ikhsan Abdul Nafi'u";
+const REKAP_TITLE = "Rekap Uang by Ikhsan Abdul Nafi'u";
 const REKAP_HEADER = [
   'Tanggal', 'Item', 'Kategori', 'Toko', 'Pemasukan',
   'Pengeluaran', 'Catatan', 'Pencatat', 'Akun', 'ID'
@@ -3470,7 +3470,7 @@ bot.command('buatkan', async (ctx) => {
     const drive = google.drive({ version: 'v3', auth: dClient });
 
     // 1) Salin template → spreadsheet baru (taruh di Shared Drive bila diset).
-    const copyBody = { name: `Rekap Keuangan - ${nama}` };
+    const copyBody = { name: `Rekap Uang - ${nama}` };
     if (config.sharedDriveId) copyBody.parents = [config.sharedDriveId];
     const copy = await drive.files.copy({
       fileId: templateId,
@@ -3634,7 +3634,7 @@ bot.use(async (ctx, next) => {
     }
     return ctx.reply(
       'Halo! 👋 Kamu belum terdaftar.\n' +
-      'Untuk mulai memakai bot ini, daftar dulu via Instagram @rekapkeuangan ' +
+      'Untuk mulai memakai bot ini, daftar dulu via Instagram @rekapuang.id ' +
       'atau gabung grup: ' + groupLink()
     );
   }
@@ -3642,7 +3642,7 @@ bot.use(async (ctx, next) => {
   if (!tenantActive(tenant)) {
     return ctx.reply(
       'Masa aktif kamu sudah berakhir ⏳\n' +
-      'Yuk perpanjang lewat @rekapkeuangan supaya bisa lanjut mencatat. Terima kasih! 🙏'
+      'Yuk perpanjang lewat @rekapuang.id supaya bisa lanjut mencatat. Terima kasih! 🙏'
     );
   }
 
@@ -3656,7 +3656,7 @@ bot.start(async (ctx) => {
   if (!(await guardOwner(ctx))) return;
 
   return ctx.reply(
-    '👋 Selamat datang di Bot Rekap Keuangan!\n' +
+    '👋 Selamat datang di Bot Rekap Uang!\n' +
     'Catat pemasukan & pengeluaran langsung dari chat, otomatis masuk Google Sheets.\n' +
     '\n' +
     '✍️ CARA MENGISI (paling mudah):\n' +

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Generate ready-to-post Instagram images (PNG) for @rekapkeuangan."""
+"""Generate ready-to-post Instagram images (PNG) for @rekapuang.id."""
 import re
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -59,7 +59,7 @@ def draw_post(c, W, H, theme, kicker, title, body_lines, cta, tsize=72):
         c.setFillColorRGB(*th["pilltext"]); c.drawString(px+35,py+24,clean(cta))
     # brand footer
     c.setFillColorRGB(*th["title"]); c.setFont("Helvetica-Bold",34)
-    c.drawString(M,90,"@rekapkeuangan")
+    c.drawString(M,90,"@rekapuang.id")
     c.setFillColorRGB(*th["body"]); c.setFont("Helvetica",24)
     c.drawString(M,60,"Asisten keuangan di Telegram")
 
@@ -70,7 +70,7 @@ c=canvas.Canvas("ig_feed.pdf",pagesize=(W,H))
 draw_post(c,W,H,"dark","Pernah ngerasa?",
     "Gaji habis, nggak tau ke mana?",
     ["Masalahnya bukan boros —", "tapi nggak kecatat.","",
-     "Rekap Keuangan: cukup chat", "\"keluar makan 25rb\", langsung", "rapi ke Google Sheets + laporan."],
+     "Rekap Uang: cukup chat", "\"keluar makan 25rb\", langsung", "rapi ke Google Sheets + laporan."],
     "DM 'MAU' di sini", tsize=70); c.showPage()
 
 draw_post(c,W,H,"cream","Semudah chat",
@@ -98,7 +98,7 @@ c.save()
 # ---- STORY 1080x1920 ----
 Ws,Hs=1080,1920
 cs=canvas.Canvas("ig_story.pdf",pagesize=(Ws,Hs))
-draw_post(cs,Ws,Hs,"dark","Rekap Keuangan",
+draw_post(cs,Ws,Hs,"dark","Rekap Uang",
     "Atur uang tanpa ribet",
     ["- Catat lewat chat / suara","- Foto struk auto-baca","- Budget, target, neraca","- Laporan + grafik otomatis","","Mulai Rp99rb/tahun.","Setup dibantu sampai jalan."],
     "Geser / DM 'MAU'", tsize=80)

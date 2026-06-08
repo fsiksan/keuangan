@@ -1,4 +1,4 @@
-# Email Selamat Datang Pelanggan — Rekap Keuangan
+# Email Selamat Datang Pelanggan — Rekap Uang
 
 Ganti `[NAMA]`, `[LINK_BOT]`, `[LINK_SHEET]` sebelum dikirim.
 Ada 2 versi: **email biasa (teks)** dan **versi singkat untuk WhatsApp/Telegram**.
@@ -7,14 +7,14 @@ Ada 2 versi: **email biasa (teks)** dan **versi singkat untuk WhatsApp/Telegram*
 
 ## Subjek email
 ```
-🎉 Akun Rekap Keuangan kamu sudah aktif!
+🎉 Akun Rekap Uang kamu sudah aktif!
 ```
 
 ## Versi Email (teks)
 ```
 Halo, [NAMA]! 👋
 
-Terima kasih sudah bergabung dengan Rekap Keuangan 🎉
+Terima kasih sudah bergabung dengan Rekap Uang 🎉
 Akun kamu sudah AKTIF dan siap dipakai.
 
 Mulai sekarang, mencatat keuangan semudah chatting — semua otomatis rapi
@@ -38,19 +38,19 @@ ke Google Sheets lengkap dengan laporan & grafik.
 🏦 Neraca & aset
 
 💡 Butuh bantuan? Balas email ini atau hubungi kami di Instagram
-@rekapkeuangan. Selamat mencatat & semoga keuanganmu makin sehat! 💪
+@rekapuang.id. Selamat mencatat & semoga keuanganmu makin sehat! 💪
 
 —
-Terima kasih telah menggunakan Rekap Keuangan
+Terima kasih telah menggunakan Rekap Uang
 Rapikan Keuanganmu ✨
-Copyright 2026 © @rekapkeuangan
+Copyright 2026 © @rekapuang.id
 ```
 
 ---
 
 ## Versi Singkat (WhatsApp / Telegram / DM)
 ```
-Halo [NAMA]! 👋 Akun *Rekap Keuangan* kamu sudah AKTIF 🎉
+Halo [NAMA]! 👋 Akun *Rekap Uang* kamu sudah AKTIF 🎉
 
 Akses kamu:
 💬 Bot Telegram: [LINK_BOT]
@@ -64,7 +64,7 @@ Cara mulai:
 Ada kendala? Chat aja ya 🙌
 
 —
-Terima kasih telah menggunakan Rekap Keuangan
+Terima kasih telah menggunakan Rekap Uang
 Rapikan Keuanganmu ✨
-Copyright 2026 © @rekapkeuangan
+Copyright 2026 © @rekapuang.id
 ```

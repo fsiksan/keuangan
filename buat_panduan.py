@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Generate a complete PDF user guide for the Rekap Keuangan Telegram bot,
+"""Generate a complete PDF user guide for the Rekap Uang Telegram bot,
 including simulated Telegram chat 'screenshots' (dark-theme bubbles)."""
 
 import re
@@ -69,7 +69,7 @@ class Guide:
     def _footer(self):
         self.c.setFont("Helvetica", 8)
         self.c.setFillColorRGB(*GRAY)
-        self.c.drawCentredString(W / 2, 30, "Panduan Bot Rekap Keuangan  •  halaman %d" % self.page)
+        self.c.drawCentredString(W / 2, 30, "Panduan Bot Rekap Uang  •  halaman %d" % self.page)
 
     def newpage(self):
         self._footer()
@@ -320,7 +320,7 @@ c.drawImage(LOGO, W / 2 - _logo / 2, H - 116, _logo, _logo,
             mask='auto', preserveAspectRatio=True)
 c.setFillColorRGB(1, 1, 1)
 c.setFont("Helvetica-Bold", 30)
-c.drawCentredString(W / 2, H - 158, "Bot Rekap Keuangan")
+c.drawCentredString(W / 2, H - 158, "Bot Rekap Uang")
 c.setFont("Helvetica", 15)
 c.drawCentredString(W / 2, H - 184, "Panduan Lengkap Penggunaan")
 c.setFillColorRGB(0.8, 0.85, 0.9)
@@ -328,7 +328,7 @@ c.setFont("Helvetica", 10)
 c.drawCentredString(W / 2, H - 300, "Pemasukan - Pengeluaran - Struk - Budget - Target - Neraca")
 # little mock bubbles on cover
 g.y = H - 340
-g.chat("Rekap Keuangan", [
+g.chat("Rekap Uang", [
     ("user", "keluar makan 25000 di warung agam pakai gopay"),
     ("bot", "Sip, dicatat ya\npengeluaran | makan -> Makanan | toko: warung agam | Gopay | Rp25.000"),
 ], width=420)
@@ -361,7 +361,7 @@ g.para("Format paling mudah:")
 g.code("keluar <item> <nominal>\nmasuk <item> <nominal>")
 g.para("\"item\" adalah nama/jenisnya (mis. bensin, makan, gaji). Bot otomatis "
        "mengelompokkannya ke kategori induk (bensin -> Transportasi, makan -> Makanan).")
-g.chat("Rekap Keuangan", [
+g.chat("Rekap Uang", [
     ("user", "keluar bensin 50000"),
     ("bot", "Sip, dicatat ya\npengeluaran | bensin -> Transportasi | Rp50.000"),
     ("user", "masuk gaji 5jt"),
@@ -373,7 +373,7 @@ g.bullet("pakai <akun>  ->  memilih dompet/akun. Contoh: keluar kopi 20rb pakai 
 g.bullet("#catatan  ->  menambah catatan. Contoh: keluar wifi 150rb #bayar bulanan")
 g.bullet("tgl <tanggal>  ->  mencatat untuk tanggal lampau. Contoh: keluar makan 25rb tgl 3/6/2026")
 g.para("Semua bisa digabung dalam satu pesan, urutannya bebas:", gap=3)
-g.chat("Rekap Keuangan", [
+g.chat("Rekap Uang", [
     ("user", "keluar makan 25000 di warung agam pakai gopay #makan siang"),
     ("bot", "Beres! Dicatat ya\npengeluaran | makan -> Makanan | toko: warung agam | Gopay | Rp25.000 | #makan siang"),
 ])
@@ -388,7 +388,7 @@ g.para("Kirim beberapa baris dalam satu pesan; tiap baris dicatat terpisah.")
 g.h1("3. Foto Struk (otomatis dibaca AI)")
 g.para("Foto atau upload struk belanja. Bot membaca toko, tanggal, kategori, dan total, "
        "lalu menampilkan ringkasan dengan tombol konfirmasi sebelum disimpan.")
-g.chat("Rekap Keuangan", [
+g.chat("Rekap Uang", [
     ("user", "[ Foto struk Indomaret ]"),
     ("bot", "Sebentar ya, lagi baca strukmu ..."),
     ("bot", "Hasil baca struk\nTanggal: 16/5/2026\nItem: Belanja harian\nKategori: Kebutuhan Pokok\nToko: Indomaret\nTotal: Rp25.000\n\nKategorinya pas? Kalau perlu ganti dulu, lalu tekan Simpan"),
@@ -401,7 +401,7 @@ g.para("Di bawah pesan muncul tombol: pilihan kategori, [ Simpan ] dan [ Batal ]
 g.h1("4. Pesan Suara")
 g.para("Kirim voice note, bot akan mengetik ulang lalu mencatatnya seperti teks biasa. "
        "(Butuh layanan transkripsi/STT yang diaktifkan di konfigurasi.)")
-g.chat("Rekap Keuangan", [
+g.chat("Rekap Uang", [
     ("user", "[ Pesan suara 0:03 ]"),
     ("bot", "\"keluar kopi 20 ribu pakai gopay\""),
     ("bot", "Sip, dicatat ya\npengeluaran | kopi -> Minuman | Gopay | Rp20.000"),
@@ -412,7 +412,7 @@ g.h1("5. Budget & Peringatan")
 g.para("Atur batas pengeluaran bulanan per kategori. Bot otomatis mengingatkan saat "
        "pemakaian mendekati (80%) atau melebihi batas.")
 g.code("budget makanan 1jt        (atur budget)\nbudget hapus makanan      (hapus budget)")
-g.chat("Rekap Keuangan", [
+g.chat("Rekap Uang", [
     ("user", "budget makanan 1jt"),
     ("bot", "Sip Budget Makanan diset Rp1.000.000 / bulan. Nanti kuingatkan kalau mepet ya."),
     ("user", "keluar makan 900rb"),
@@ -424,7 +424,7 @@ g.para("Lihat ringkasan budget + grafik di sheet dengan perintah /budget. "
 # ---------------- 6. TARGET ----------------
 g.h1("6. Target Tabungan")
 g.code("target liburan 5jt        (buat target)\nnabung liburan 500k       (tambah tabungan)\ntarget hapus liburan      (hapus)")
-g.chat("Rekap Keuangan", [
+g.chat("Rekap Uang", [
     ("user", "target liburan 5jt"),
     ("bot", "Mantap, target \"liburan\" diset Rp5.000.000\nMulai nabung: nabung liburan <nominal>"),
     ("user", "nabung liburan 500k"),
@@ -456,7 +456,7 @@ g.para("Setiap transaksi bisa menyebut akun (pakai <akun>). Saldo tiap akun (Kas
        "Bank, dst.) dihitung otomatis dan menjadi aset di Neraca. Tambahkan aset/liabilitas "
        "lain secara manual.")
 g.code("aset Bank BCA 5jt\naset Emas 10jt\nliabilitas KPR 100jt\naset hapus Emas")
-g.chat("Rekap Keuangan", [
+g.chat("Rekap Uang", [
     ("user", "/akun"),
     ("bot", "Saldo per Akun/Dompet\n- Kas: Rp1.200.000\n- Bank Bca: Rp5.000.000\n- Gopay: Rp300.000\n\nTotal: Rp6.500.000"),
     ("user", "/neraca"),
@@ -660,7 +660,7 @@ c.drawImage(MASKOT, W / 2 - _cmw / 2, maskot_top - _cmh, _cmw, _cmh,
 cardx = MARGIN + 18
 cardw = CONTENT_W - 36
 body_txt = ("Sekali bayar, pakai seumur hidup - plus update fitur terbaru gratis. "
-            "Jadikan Rekap Keuangan asisten keuanganmu untuk selamanya.")
+            "Jadikan Rekap Uang asisten keuanganmu untuk selamanya.")
 body_lines = wrap(body_txt, "Helvetica", 11, cardw - 56)
 
 pad = 24
@@ -701,7 +701,7 @@ for ln in body_lines:
 cy -= 18
 
 # CTA pill (emas)
-_cta = "Pesan via DM Instagram  @rekapkeuangan"
+_cta = "Pesan via DM Instagram  @rekapuang.id"
 cw = stringWidth(_cta, "Helvetica-Bold", 11.5) + 44
 c.setFillColorRGB(*GOLD_L)
 c.roundRect(W / 2 - cw / 2, cy - cta_h + 4, cw, cta_h - 6, 13, fill=1, stroke=0)
@@ -719,7 +719,7 @@ c.setFont("Helvetica-Bold", 11)
 c.drawCentredString(W / 2, copy_y, "Rapikan Keuanganmu")
 c.setFillColorRGB(*GRAY)
 c.setFont("Helvetica", 9.5)
-c.drawCentredString(W / 2, copy_y - 16, "Copyright (c) 2026  -  @rekapkeuangan  -  by @fsiksan")
+c.drawCentredString(W / 2, copy_y - 16, "Copyright (c) 2026  -  @rekapuang.id  -  by @fsiksan")
 
 g.save()
 print("PDF dibuat: panduan-bot-rekap-keuangan.pdf")

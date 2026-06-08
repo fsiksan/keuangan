@@ -1,4 +1,4 @@
-# Template Balasan DM / Chat Jualan — Rekap Keuangan
+# Template Balasan DM / Chat Jualan — Rekap Uang
 
 Salin-tempel sesuai situasi. Ganti bagian `[...]`. Nada: ramah, singkat, meyakinkan.
 
@@ -6,7 +6,7 @@ Salin-tempel sesuai situasi. Ganti bagian `[...]`. Nada: ramah, singkat, meyakin
 
 ## 1. Balasan pembuka (saat ada yang DM / komen "MAU")
 ```
-Halo kak! 👋 Makasih udah tertarik sama Rekap Keuangan 🙌
+Halo kak! 👋 Makasih udah tertarik sama Rekap Uang 🙌
 
 Ini bot Telegram buat catat keuangan cukup lewat chat — otomatis rapi ke
 Google Sheets + laporan & grafik. Bisa foto struk, catat pakai suara, budget,
