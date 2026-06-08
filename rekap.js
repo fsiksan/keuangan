@@ -3385,23 +3385,46 @@ bot.command('buatkan', async (ctx) => {
     );
   } catch (err) {
     logError('Gagal /buatkan.', err);
-    const msg = String((err && err.message) || '');
-    if (/storageQuota/i.test(msg)) {
+    // Ambil pesan error asli dari Google API (paling informatif untuk diagnosa).
+    let detail = String((err && err.message) || '');
+    try {
+      const apiErr = err && err.response && err.response.data && err.response.data.error;
+      if (apiErr && apiErr.message) detail = apiErr.message;
+      else if (err && Array.isArray(err.errors) && err.errors[0] && err.errors[0].message) detail = err.errors[0].message;
+    } catch (_) {}
+    const detailLine = detail ? `\n\n🔎 Detail: ${detail.slice(0, 300)}` : '';
+
+    if (/storageQuota/i.test(detail)) {
       return ctx.reply(
         '❌ Gagal: service account kena limit penyimpanan Drive ' +
         '(storageQuotaExceeded).\n\nSolusi:\n' +
         '• Isi sharedDriveId di rekap.json (pakai Shared Drive), ATAU\n' +
         '• Salin template manual di Google Drive, share ke email pelanggan, ' +
-        'lalu daftarkan dengan /daftar.'
+        'lalu daftarkan dengan /daftar.' + detailLine
       );
     }
-    if (/File not found|notFound|insufficientPermissions|forbidden/i.test(msg)) {
+    if (/has not been used in project|accessNotConfigured|SERVICE_DISABLED|Drive API/i.test(detail)) {
       return ctx.reply(
-        '❌ Gagal mengakses template. Pastikan templateSpreadsheetId benar dan ' +
-        'service account sudah jadi Editor di template, serta Google Drive API aktif.'
+        '❌ Google Drive API belum aktif untuk project service account-mu.\n\n' +
+        'Aktifkan di Google Cloud Console:\n' +
+        'APIs & Services → Library → cari "Google Drive API" → Enable.\n' +
+        '(Tunggu 1-2 menit setelah Enable, lalu coba lagi.)' + detailLine
       );
     }
-    return ctx.reply('Gagal membuat pelanggan otomatis. Cek log server.');
+    if (/File not found|notFound/i.test(detail)) {
+      return ctx.reply(
+        '❌ Template tidak ditemukan. Pastikan templateSpreadsheetId di rekap.json ' +
+        'benar (ID dari URL spreadsheet template, bukan link lengkap).' + detailLine
+      );
+    }
+    if (/permission|insufficientPermissions|forbidden|caller does not have/i.test(detail)) {
+      return ctx.reply(
+        '❌ Service account belum punya akses ke template. Buka spreadsheet ' +
+        'template → Share → tambahkan email service account (lihat client_email di ' +
+        'rekap-credentials.json) sebagai Editor.' + detailLine
+      );
+    }
+    return ctx.reply('Gagal membuat pelanggan otomatis.' + detailLine);
   }
 });
 
