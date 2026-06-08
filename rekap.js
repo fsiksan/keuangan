@@ -489,6 +489,9 @@ async function ensureHeader() {
   const sheets = google.sheets({ version: 'v4', auth: client });
   const sheetName = getSheetName();
 
+  // Pastikan tab transaksi ada (mis. salinan template memakai nama tab berbeda).
+  await ensureSheetExists(sheetName);
+
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: ssId(),
     range: `'${sheetName}'!A1:J2`,
@@ -3345,7 +3348,7 @@ bot.command('buatkan', async (ctx) => {
     const nama = p[1];
     const email = p[2];
     const aktifSampai = p[3] || 'lifetime';
-    const sheetName = p[4] || config.sheetName || 'Rekap';
+    let sheetName = p[4] || ''; // bila kosong, dideteksi dari template setelah disalin
 
     await ctx.reply('⏳ Membuat spreadsheet & membagikan ke ' + email + ' ...');
 
@@ -3361,6 +3364,20 @@ bot.command('buatkan', async (ctx) => {
       requestBody: copyBody,
     });
     const newId = copy.data.id;
+
+    // 1b) Tentukan nama tab transaksi agar cocok dengan isi template.
+    if (!sheetName) {
+      try {
+        const sClient = await auth.getClient();
+        const sApi = google.sheets({ version: 'v4', auth: sClient });
+        const sMeta = await sApi.spreadsheets.get({ spreadsheetId: newId, fields: 'sheets(properties(title,index))' });
+        const titles = (sMeta.data.sheets || []).map((s) => s.properties.title);
+        const preferred = config.sheetName || 'Rekap';
+        sheetName = titles.includes(preferred) ? preferred : (titles[0] || preferred);
+      } catch (e) {
+        sheetName = config.sheetName || 'Rekap';
+      }
+    }
 
     // 2) Bagikan ke email pelanggan sebagai Editor.
     await drive.permissions.create({
@@ -5271,7 +5288,16 @@ bot.on('text', async (ctx) => {
     return ctx.reply(reply);
   } catch (err) {
     logError('Gagal memproses pesan.', err);
-    return ctx.reply('Gagal memproses pesan.');
+    let extra = '';
+    if (isAdmin(ctx)) {
+      let d = String((err && err.message) || '');
+      try {
+        const apiErr = err && err.response && err.response.data && err.response.data.error;
+        if (apiErr && apiErr.message) d = apiErr.message;
+      } catch (_) {}
+      if (d) extra = `\n\n🔎 (admin) ${d.slice(0, 300)}`;
+    }
+    return ctx.reply('Gagal memproses pesan.' + extra);
   }
 });
 
