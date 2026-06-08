@@ -996,19 +996,20 @@ async function updateAnalisaSheet() {
       }
     });
   }
-  // Tonjolkan sel dropdown
+  // Tonjolkan sel dropdown + paksa format ANGKA biasa (hindari sisa format
+  // mata uang dari layout lama yang membuat bulan tampil "Rp6").
   requests.push({
     repeatCell: {
       range: rangeCell(periodeRowIdx, periodeRowIdx + 1, 1, 2),
-      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true } } },
-      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold'
+      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true }, numberFormat: { type: 'NUMBER', pattern: '0' } } },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold,userEnteredFormat.numberFormat'
     }
   });
   requests.push({
     repeatCell: {
       range: rangeCell(periodeRowIdx, periodeRowIdx + 1, 3, 4),
-      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true } } },
-      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold'
+      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true }, numberFormat: { type: 'NUMBER', pattern: '0' } } },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold,userEnteredFormat.numberFormat'
     }
   });
 
@@ -1908,19 +1909,19 @@ async function refreshBudgetSheet(month, year) {
       }
     }
   });
-  // Tonjolkan sel dropdown F2 & H2
+  // Tonjolkan sel dropdown F2 & H2 + paksa format ANGKA biasa (bukan mata uang)
   requests.push({
     repeatCell: {
       range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 5, endColumnIndex: 6 },
-      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true, fontFamily: font }, horizontalAlignment: 'CENTER' } },
-      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment'
+      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true, fontFamily: font }, horizontalAlignment: 'CENTER', numberFormat: { type: 'NUMBER', pattern: '0' } } },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment,userEnteredFormat.numberFormat'
     }
   });
   requests.push({
     repeatCell: {
       range: { sheetId, startRowIndex: 1, endRowIndex: 2, startColumnIndex: 7, endColumnIndex: 8 },
-      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true, fontFamily: font }, horizontalAlignment: 'CENTER' } },
-      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment'
+      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true, fontFamily: font }, horizontalAlignment: 'CENTER', numberFormat: { type: 'NUMBER', pattern: '0' } } },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment,userEnteredFormat.numberFormat'
     }
   });
 
