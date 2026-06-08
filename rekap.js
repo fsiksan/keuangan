@@ -1,6 +1,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const { google } = require('googleapis');
 const { AsyncLocalStorage } = require('async_hooks');
+const fs = require('fs');
 const Anthropic = require('@anthropic-ai/sdk');
 const config = require('./rekap.json');
 
@@ -3293,6 +3294,28 @@ async function deletePelanggan(userId) {
 }
 
 // ---- Perintah admin (hanya untuk getAdminIds) ----
+
+// Tampilkan email service account — yang HARUS di-share (Editor) ke tiap
+// spreadsheet (master, template, & sheet pelanggan).
+bot.command('saemail', async (ctx) => {
+  try {
+    if (!isAdmin(ctx)) return;
+    const credFile = config.credentialsFile || './rekap-credentials.json';
+    let email = '(tidak terbaca)';
+    try { email = JSON.parse(fs.readFileSync(credFile, 'utf8')).client_email || email; } catch (_) {}
+    return ctx.reply(
+      '🔑 Email service account:\n' + email + '\n\n' +
+      'Pastikan email ini sudah di-Share sebagai *Editor* di:\n' +
+      '• Spreadsheet master\n• Spreadsheet template\n• Tiap spreadsheet pelanggan\n\n' +
+      'Error 403 "caller does not have permission" = email ini belum jadi Editor ' +
+      'di spreadsheet yang diakses.',
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) {
+    logError('Gagal /saemail.', err);
+    return ctx.reply('Gagal membaca email service account.');
+  }
+});
 
 bot.command('daftar', async (ctx) => {
   try {
