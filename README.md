@@ -351,6 +351,11 @@ Sheet **Analisa** dibuat & diperbarui otomatis setiap ada transaksi, berisi:
 * **Grafik**: pie Pemasukan vs Pengeluaran, pie pengeluaran per Kategori/Toko/Pencatat,
   pie pemasukan per Kategori, dan bar Pemasukan & Pengeluaran per Bulan
 * Judul & header tabel diberi warna agar lebih enak dilihat
+* **Filter periode interaktif:** di bagian atas ada **dropdown Bulan & Tahun**.
+  Pilih bulan/tahun, lalu angka "Pemasukan/Pengeluaran/Saldo periode" dan
+  rincian "Pengeluaran per Kategori (periode)" langsung berubah otomatis
+  (berbasis rumus, tanpa perlu perintah). Bagian RINGKASAN di bawahnya tetap
+  menampilkan total keseluruhan.
 
 **Gambar ilustrasi (opsional):** isi `analisaImageUrl` / `neracaImageUrl` /
 `budgetImageUrl` di rekap.json dengan URL gambar publik untuk menampilkan

@@ -169,6 +169,9 @@ const EXPENSE_CATEGORY_RULES = [
   ['Belanja', ['baju', 'pakaian', 'sepatu', 'fashion', 'elektronik', 'gadget', 'shopee', 'tokopedia', 'lazada', 'olshop', 'online shop']],
 ];
 
+// Daftar induk kategori pengeluaran (untuk rincian periode di Analisa)
+const PARENT_EXPENSE_CATS = EXPENSE_CATEGORY_RULES.map((r) => r[0]).concat(['Lainnya']);
+
 // Aturan induk kategori untuk pemasukan
 const INCOME_CATEGORY_RULES = [
   ['Gaji', ['gaji', 'salary', 'upah']],
@@ -787,6 +790,53 @@ async function formatSheetLayout() {
       ]
     }
   });
+
+  // Kolom bantu TERSEMBUNYI untuk filter periode di sheet Analisa:
+  // K=bulan, L=tahun, M=pemasukan(angka), N=pengeluaran(angka).
+  try {
+    const dataRows = values.slice(1);
+    const helper = dataRows.map((r) => {
+      const d = parseDateParts(r[0] || '');
+      return [
+        d ? d.month : '',
+        d ? d.year : '',
+        parseRupiahTextToNumber(r[4] || ''),
+        parseRupiahTextToNumber(r[5] || '')
+      ];
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: ssId(),
+      range: `'${sheetName}'!K1:N1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [['_bln', '_thn', '_pemNum', '_pengNum']] }
+    });
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: ssId(),
+      range: `'${sheetName}'!K2:N100000`
+    });
+    if (helper.length > 0) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: ssId(),
+        range: `'${sheetName}'!K2`,
+        valueInputOption: 'RAW',
+        requestBody: { values: helper }
+      });
+    }
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: ssId(),
+      requestBody: {
+        requests: [{
+          updateDimensionProperties: {
+            range: { sheetId, dimension: 'COLUMNS', startIndex: 10, endIndex: 14 },
+            properties: { hiddenByUser: true },
+            fields: 'hiddenByUser'
+          }
+        }]
+      }
+    });
+  } catch (e) {
+    logError('Gagal menyiapkan kolom bantu periode.', e);
+  }
 }
 
 async function ensureSheetExists(sheetName) {
@@ -901,6 +951,33 @@ async function updateAnalisaSheet() {
   const pctOf = (v) => (totalPengeluaran > 0 ? v / totalPengeluaran : 0);
   const pctOfIncome = (v) => (totalPemasukan > 0 ? v / totalPemasukan : 0);
 
+  // Sheet utama (sumber data + kolom bantu K..N) dan pemisah argumen rumus per locale.
+  const mainSheet = getSheetName();
+  const curMonthNow = Number(now.toLocaleDateString('en-US', { timeZone: getTimezone(), month: 'numeric' }));
+  const curYearNow = Number(now.toLocaleDateString('en-US', { timeZone: getTimezone(), year: 'numeric' }));
+  let formulaSep = ',';
+  let selBulan = curMonthNow;
+  let selTahun = curYearNow;
+  try {
+    const metaL = await sheets.spreadsheets.get({ spreadsheetId: ssId(), fields: 'properties.locale' });
+    const loc = (metaL.data.properties && metaL.data.properties.locale) || 'en_US';
+    if (!/^en/i.test(loc)) formulaSep = ';';
+  } catch (e) {}
+  try {
+    const prev = await sheets.spreadsheets.values.get({ spreadsheetId: ssId(), range: `'${sheetName}'!B5:D5` });
+    const pv = (prev.data.values && prev.data.values[0]) || [];
+    const pb = Number(pv[0]); const py = Number(pv[2]);
+    if (Number.isInteger(pb) && pb >= 1 && pb <= 12) selBulan = pb;
+    if (Number.isInteger(py) && py >= 2000) selTahun = py;
+  } catch (e) {}
+  // tahun pilihan: dari data + tahun berjalan
+  const yearSet = new Set([curYearNow, selTahun]);
+  for (const k of Object.keys(perBulan)) yearSet.add(perBulan[k].year);
+  const yearVals = Array.from(yearSet).filter((y) => y >= 2000).sort((a, b) => b - a);
+
+  const S = formulaSep;
+  const rng = (col) => `'${mainSheet}'!${col}2:${col}100000`;
+
   // Bangun baris sambil mencatat posisi (index 0-based) untuk acuan grafik.
   const rows = [];
   const boldRows = [];
@@ -908,6 +985,26 @@ async function updateAnalisaSheet() {
 
   rows.push(['ANALISA KEUANGAN']);
   rows.push([`Diperbarui: ${generatedAt}`]);
+  rows.push(['']);
+
+  // ----- PERIODE (dropdown bulan & tahun, terhitung live via rumus) -----
+  boldRows.push(at()); rows.push(['PERIODE (pilih bulan & tahun)']);
+  const periodeRowIdx = at(); rows.push(['Bulan', selBulan, 'Tahun', selTahun]);
+  const pr = periodeRowIdx + 1; // nomor baris sheet untuk sel dropdown
+  const pPemIdx = at();
+  rows.push(['Pemasukan periode', `=SUMIFS(${rng('M')}${S}${rng('K')}${S}$B$${pr}${S}${rng('L')}${S}$D$${pr})`]);
+  const pPengIdx = at();
+  rows.push(['Pengeluaran periode', `=SUMIFS(${rng('N')}${S}${rng('K')}${S}$B$${pr}${S}${rng('L')}${S}$D$${pr})`]);
+  const pSaldoIdx = at();
+  rows.push(['Saldo periode', `=B${pPemIdx + 1}-B${pPengIdx + 1}`]);
+  rows.push(['']);
+  boldRows.push(at()); rows.push(['PENGELUARAN PER KATEGORI (periode)']);
+  boldRows.push(at()); rows.push(['Kategori', 'Jumlah']);
+  const periodeKatStart = at();
+  for (const cat of PARENT_EXPENSE_CATS) {
+    rows.push([cat, `=SUMIFS(${rng('N')}${S}${rng('K')}${S}$B$${pr}${S}${rng('L')}${S}$D$${pr}${S}${rng('C')}${S}"${cat}")`]);
+  }
+  const periodeKatEnd = at();
   rows.push(['']);
 
   boldRows.push(at()); rows.push(['RINGKASAN']);
@@ -991,7 +1088,7 @@ async function updateAnalisaSheet() {
   await sheets.spreadsheets.values.update({
     spreadsheetId: ssId(),
     range: `'${sheetName}'!A1`,
-    valueInputOption: 'RAW',
+    valueInputOption: 'USER_ENTERED',
     requestBody: { values: rows },
   });
 
@@ -1033,6 +1130,58 @@ async function updateAnalisaSheet() {
   for (const id of existingChartIds) {
     requests.push({ deleteEmbeddedObject: { objectId: id } });
   }
+
+  // Dropdown Bulan (B) & Tahun (D) pada baris periode
+  requests.push({
+    setDataValidation: {
+      range: rangeCell(periodeRowIdx, periodeRowIdx + 1, 1, 2),
+      rule: {
+        condition: { type: 'ONE_OF_LIST', values: Array.from({ length: 12 }, (_, i) => ({ userEnteredValue: String(i + 1) })) },
+        showCustomUi: true, strict: false
+      }
+    }
+  });
+  requests.push({
+    setDataValidation: {
+      range: rangeCell(periodeRowIdx, periodeRowIdx + 1, 3, 4),
+      rule: {
+        condition: { type: 'ONE_OF_LIST', values: yearVals.map((y) => ({ userEnteredValue: String(y) })) },
+        showCustomUi: true, strict: false
+      }
+    }
+  });
+  // Format mata uang sel periode (Pemasukan/Pengeluaran/Saldo + rincian kategori)
+  requests.push({
+    repeatCell: {
+      range: rangeCell(pPemIdx, pSaldoIdx + 1, 1, 2),
+      cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '"Rp"#,##0' } } },
+      fields: 'userEnteredFormat.numberFormat'
+    }
+  });
+  if (periodeKatEnd > periodeKatStart) {
+    requests.push({
+      repeatCell: {
+        range: rangeCell(periodeKatStart, periodeKatEnd, 1, 2),
+        cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '"Rp"#,##0' } } },
+        fields: 'userEnteredFormat.numberFormat'
+      }
+    });
+  }
+  // Tonjolkan sel dropdown
+  requests.push({
+    repeatCell: {
+      range: rangeCell(periodeRowIdx, periodeRowIdx + 1, 1, 2),
+      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true } } },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold'
+    }
+  });
+  requests.push({
+    repeatCell: {
+      range: rangeCell(periodeRowIdx, periodeRowIdx + 1, 3, 4),
+      cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 0.97, blue: 0.8 }, textFormat: { bold: true } } },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold'
+    }
+  });
 
   // Judul besar — teks putih di atas latar hijau
   requests.push({
