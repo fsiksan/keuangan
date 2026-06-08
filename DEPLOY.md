@@ -50,10 +50,21 @@ Tambahkan di `rekap.json`:
 ```json
   "multiTenant": true,
   "masterSpreadsheetId": "ISI_ID_SPREADSHEET_MASTER",
+  "templateSpreadsheetId": "ISI_ID_SPREADSHEET_TEMPLATE",
   "adminUserIds": "ISI_TELEGRAM_ID_ADMIN",
   "groupLink": "https://t.me/+D5IRzFMN2mM5NzM1"
 ```
 Sheet **Pelanggan** dibuat otomatis di spreadsheet master.
+
+**Penting:** aktifkan **Google Drive API** (selain Sheets API), dan jadikan
+service account **Editor** di spreadsheet *master* dan *template*. Lalu cukup
+jalankan di bot:
+```
+/buatkan TelegramID; Nama; Email; 31/12/2026
+```
+Bot otomatis menyalin template, membagikan ke email pelanggan, dan mendaftarkan.
+Bila service account biasa kena `storageQuotaExceeded`, tambahkan
+`"sharedDriveId": "ID_SHARED_DRIVE"` di `rekap.json` (buat salinan di Shared Drive).
 
 ## 4. Jalankan dengan PM2 (auto-restart + auto-start saat reboot)
 ```bash

@@ -290,18 +290,34 @@ sendiri dan masa aktif sendiri. Aktifkan di `rekap.json`:
 "masterSpreadsheetId": "ID_SPREADSHEET_MASTER",
 "pelangganSheetName": "Pelanggan",
 "adminUserIds": "356841296",
-"groupLink": "https://t.me/+D5IRzFMN2mM5NzM1"
+"groupLink": "https://t.me/+D5IRzFMN2mM5NzM1",
+"templateSpreadsheetId": "ID_SPREADSHEET_TEMPLATE",
+"sharedDriveId": "ID_SHARED_DRIVE_OPSIONAL"
 ```
 
 - **masterSpreadsheetId**: spreadsheet pusat berisi sheet **Pelanggan** dengan
   kolom: `Telegram ID | Nama | Email | Spreadsheet ID | Sheet Name | Paket | Aktif Sampai`
   (header dibuat otomatis). Pastikan service account jadi editor di sini & di tiap sheet pelanggan.
 - **adminUserIds**: yang boleh memakai perintah admin (default = ownerUserId).
+- **templateSpreadsheetId**: spreadsheet TEMPLATE yang akan disalin otomatis untuk
+  tiap pelanggan baru (lewat `/buatkan`). Jadikan service account Editor di template.
+- **sharedDriveId** (opsional): bila diisi, salinan pelanggan dibuat di Shared
+  Drive ini — menghindari error `storageQuotaExceeded` pada service account biasa.
 - User yang belum terdaftar / kedaluwarsa otomatis ditolak dengan ajakan daftar.
+
+**Prasyarat Google API (sekali saja):**
+1. Di Google Cloud Console, aktifkan **Google Sheets API** dan **Google Drive API**.
+2. Buat **Service Account**, unduh kunci JSON → simpan sebagai `rekap-credentials.json`.
+3. Buat 1 spreadsheet **Master** & 1 spreadsheet **Template**, lalu **Share**
+   keduanya ke email service account (lihat di `client_email` pada JSON) sebagai **Editor**.
+4. Isi `masterSpreadsheetId` & `templateSpreadsheetId` di `rekap.json`.
 
 **Perintah admin:**
 ```
-/daftar TelegramID; Nama; Email; SpreadsheetID; [AktifSampai]; [SheetName]
+/buatkan TelegramID; Nama; Email; [AktifSampai]; [SheetName]   ⭐ otomatis
+   contoh: /buatkan 356841296; Budi; budi@gmail.com; 31/12/2026
+   -> bot menyalin template, share ke email pelanggan, lalu mendaftarkan. Selesai.
+/daftar TelegramID; Nama; Email; SpreadsheetID; [AktifSampai]; [SheetName]  (manual)
    contoh: /daftar 356841296; Budi; budi@gmail.com; 1AbC...; 31/12/2026; Rekap
    (AktifSampai kosong = lifetime; format tanggal DD/MM/YYYY atau YYYY-MM-DD)
 /pelanggan                 - daftar pelanggan + status aktif
@@ -309,10 +325,14 @@ sendiri dan masa aktif sendiri. Aktifkan di `rekap.json`:
 /hapususer TelegramID
 ```
 
-**Alur onboarding:** pelanggan bayar -> join grup Telegram (lihat username/ID)
--> isi Email & Nama (via Google Form) -> kamu salin template sheet, share ke
-email pelanggan (Editor) + share ke service account -> jalankan `/daftar ...`
--> kirim link bot + panduan. Selesai, pelanggan langsung bisa pakai.
+**Alur onboarding (otomatis, tinggal input):** pelanggan bayar -> kasih tahu ID
+Telegram + email -> kamu cukup ketik `/buatkan ID; Nama; Email; AktifSampai` ->
+bot membuat sheet, undang email pelanggan sebagai Editor, dan mendaftarkan ->
+kirim link bot. Pelanggan ketik `/start`, langsung bisa pakai.
+
+> Bila service account biasa kena `storageQuotaExceeded` saat `/buatkan`, isi
+> `sharedDriveId`, atau pakai cara manual: salin template di Drive → share ke
+> email pelanggan → `/daftar ...`.
 
 > Catatan: fitur "kategori map" (pemetaan kategori custom) hanya aktif di mode
 > pribadi (single-tenant); di mode multi-tenant dinonaktifkan agar tidak

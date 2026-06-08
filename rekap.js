@@ -119,6 +119,17 @@ const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
 
+// Auth terpisah dengan akses Drive — dipakai khusus untuk onboarding otomatis
+// (membuat salinan spreadsheet pelanggan + membagikannya ke email). Memerlukan
+// Google Drive API aktif untuk service account.
+const driveAuth = new google.auth.GoogleAuth({
+  keyFile: config.credentialsFile || './rekap-credentials.json',
+  scopes: [
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/spreadsheets',
+  ],
+});
+
 function getSheetName() {
   const t = tenantStore.getStore();
   return (t && t.sheetName) || config.sheetName || 'Sheet1';
@@ -3283,6 +3294,97 @@ bot.command('daftar', async (ctx) => {
   } catch (err) {
     logError('Gagal /daftar.', err);
     return ctx.reply('Gagal mendaftarkan pelanggan.');
+  }
+});
+
+// Onboarding OTOMATIS: buat spreadsheet pelanggan dari template, bagikan ke
+// email-nya, lalu daftarkan ke sheet Pelanggan — semua dalam satu perintah.
+bot.command('buatkan', async (ctx) => {
+  try {
+    if (!isAdmin(ctx)) return;
+    const arg = (ctx.message.text || '').replace(/^\/buatkan(@\S+)?\s*/i, '').trim();
+    const p = arg.split(';').map((s) => s.trim());
+    if (p.length < 3 || !p[0] || !p[1] || !p[2]) {
+      return ctx.reply(
+        'Format:\n/buatkan TelegramID; Nama; Email; [AktifSampai]; [SheetName]\n\n' +
+        'Contoh:\n/buatkan 356841296; Budi; budi@gmail.com; 31/12/2026\n' +
+        '(AktifSampai kosong = lifetime)\n\n' +
+        'Bot akan otomatis menyalin spreadsheet template, membagikannya ke email ' +
+        'pelanggan, lalu mendaftarkannya. Pastikan templateSpreadsheetId sudah ' +
+        'diisi di rekap.json & Google Drive API aktif.'
+      );
+    }
+    const templateId = config.templateSpreadsheetId;
+    if (!templateId) {
+      return ctx.reply(
+        '⚠️ templateSpreadsheetId belum diisi di rekap.json.\n\n' +
+        'Isi dengan ID spreadsheet TEMPLATE (yang sudah berisi sheet Rekap dll), ' +
+        'dan jadikan service account sebagai Editor di template itu. ' +
+        'Atau pakai cara manual: /daftar.'
+      );
+    }
+
+    const userId = p[0];
+    const nama = p[1];
+    const email = p[2];
+    const aktifSampai = p[3] || 'lifetime';
+    const sheetName = p[4] || config.sheetName || 'Rekap';
+
+    await ctx.reply('⏳ Membuat spreadsheet & membagikan ke ' + email + ' ...');
+
+    const dClient = await driveAuth.getClient();
+    const drive = google.drive({ version: 'v3', auth: dClient });
+
+    // 1) Salin template → spreadsheet baru (taruh di Shared Drive bila diset).
+    const copyBody = { name: `Rekap Keuangan - ${nama}` };
+    if (config.sharedDriveId) copyBody.parents = [config.sharedDriveId];
+    const copy = await drive.files.copy({
+      fileId: templateId,
+      supportsAllDrives: true,
+      requestBody: copyBody,
+    });
+    const newId = copy.data.id;
+
+    // 2) Bagikan ke email pelanggan sebagai Editor.
+    await drive.permissions.create({
+      fileId: newId,
+      sendNotificationEmail: true,
+      supportsAllDrives: true,
+      requestBody: { type: 'user', role: 'writer', emailAddress: email },
+    });
+
+    // 3) Daftarkan ke sheet Pelanggan.
+    await upsertPelanggan({ userId, nama, email, spreadsheetId: newId, aktifSampai, sheetName });
+
+    const link = 'https://docs.google.com/spreadsheets/d/' + newId + '/edit';
+    return ctx.reply(
+      'Beres! ✅ Pelanggan siap pakai.\n\n' +
+      `👤 ${nama} (${userId})\n` +
+      `📧 ${email} (diundang sebagai Editor)\n` +
+      `📊 Sheet: ${link}\n` +
+      `🗓️ Aktif: ${aktifSampai}\n\n` +
+      'Minta pelanggan buka bot ini lalu ketik /start. Kalau mereka belum ' +
+      'pernah chat, ID Telegram-nya bisa dicek saat mereka kirim pesan pertama.'
+    );
+  } catch (err) {
+    logError('Gagal /buatkan.', err);
+    const msg = String((err && err.message) || '');
+    if (/storageQuota/i.test(msg)) {
+      return ctx.reply(
+        '❌ Gagal: service account kena limit penyimpanan Drive ' +
+        '(storageQuotaExceeded).\n\nSolusi:\n' +
+        '• Isi sharedDriveId di rekap.json (pakai Shared Drive), ATAU\n' +
+        '• Salin template manual di Google Drive, share ke email pelanggan, ' +
+        'lalu daftarkan dengan /daftar.'
+      );
+    }
+    if (/File not found|notFound|insufficientPermissions|forbidden/i.test(msg)) {
+      return ctx.reply(
+        '❌ Gagal mengakses template. Pastikan templateSpreadsheetId benar dan ' +
+        'service account sudah jadi Editor di template, serta Google Drive API aktif.'
+      );
+    }
+    return ctx.reply('Gagal membuat pelanggan otomatis. Cek log server.');
   }
 });
 
