@@ -19,6 +19,14 @@ TEAL_D = (0.13, 0.36, 0.27)
 INK = (0.13, 0.15, 0.18)
 GRAY = (0.40, 0.43, 0.47)
 LIGHT = (0.95, 0.96, 0.95)
+GOLD = (0.85, 0.65, 0.13)
+GOLD_L = (1.0, 0.84, 0.40)
+GOLD_INK = (0.30, 0.22, 0.02)
+
+# Brand assets (logo & maskot)
+LOGO = "brand/logo.png"
+MASKOT = "brand/maskot.png"
+MASKOT_RATIO = 1280.0 / 1024.0  # height / width
 
 # Telegram dark theme
 TG_BG = (0.055, 0.086, 0.13)
@@ -306,14 +314,15 @@ c.setFillColorRGB(*TG_BG)
 c.rect(0, 0, W, H, fill=1, stroke=0)
 c.setFillColorRGB(*TEAL)
 c.rect(0, H - 250, W, 250, fill=1, stroke=0)
+# logo in header band
+_logo = 74
+c.drawImage(LOGO, W / 2 - _logo / 2, H - 116, _logo, _logo,
+            mask='auto', preserveAspectRatio=True)
 c.setFillColorRGB(1, 1, 1)
 c.setFont("Helvetica-Bold", 30)
-c.drawCentredString(W / 2, H - 150, "Bot Rekap Keuangan")
+c.drawCentredString(W / 2, H - 158, "Bot Rekap Keuangan")
 c.setFont("Helvetica", 15)
-c.drawCentredString(W / 2, H - 178, "Panduan Lengkap Penggunaan")
-c.setFillColorRGB(*TG_SUB)
-c.setFont("Helvetica", 11)
-c.drawCentredString(W / 2, 120, "Catat keuangan langsung dari Telegram - otomatis ke Google Sheets")
+c.drawCentredString(W / 2, H - 184, "Panduan Lengkap Penggunaan")
 c.setFillColorRGB(0.8, 0.85, 0.9)
 c.setFont("Helvetica", 10)
 c.drawCentredString(W / 2, H - 300, "Pemasukan - Pengeluaran - Struk - Budget - Target - Neraca")
@@ -323,6 +332,14 @@ g.chat("Rekap Keuangan", [
     ("user", "keluar makan 25000 di warung agam pakai gopay"),
     ("bot", "Sip, dicatat ya\npengeluaran | makan -> Makanan | toko: warung agam | Gopay | Rp25.000"),
 ], width=420)
+# maskot at the bottom
+_mw = 150
+_mh = _mw * MASKOT_RATIO
+c.drawImage(MASKOT, W / 2 - _mw / 2, 96, _mw, _mh,
+            mask='auto', preserveAspectRatio=True)
+c.setFillColorRGB(*TG_SUB)
+c.setFont("Helvetica", 11)
+c.drawCentredString(W / 2, 74, "Catat keuangan langsung dari Telegram - otomatis ke Google Sheets")
 c.showPage()
 g.page = 2
 g.y = TOP
@@ -628,6 +645,81 @@ g.sheet("KategoriMap",
         [["rokok", "Pribadi"], ["kopi", "Jajan"]],
         weights=[1.0, 1.0],
         note="Pemetaan kategori custom buatanmu (lihat bab 11).")
+
+# ---------------- PENUTUP ----------------
+g.newpage()
+
+# Maskot hero (white background -> tampil bersih)
+_cmw = 168
+_cmh = _cmw * MASKOT_RATIO
+maskot_top = TOP - 6
+c.drawImage(MASKOT, W / 2 - _cmw / 2, maskot_top - _cmh, _cmw, _cmh,
+            mask='auto', preserveAspectRatio=True)
+
+# Kartu CTA (callout) hijau
+cardx = MARGIN + 18
+cardw = CONTENT_W - 36
+body_txt = ("Sekali bayar, pakai seumur hidup - plus update fitur terbaru gratis. "
+            "Jadikan Rekap Keuangan asisten keuanganmu untuk selamanya.")
+body_lines = wrap(body_txt, "Helvetica", 11, cardw - 56)
+
+pad = 24
+badge_h = 22
+title_h = 24
+body_h = len(body_lines) * 15
+cta_h = 32
+card_h = pad + badge_h + 14 + title_h + 8 + body_h + 18 + cta_h + pad
+
+card_top = maskot_top - _cmh - 26
+card_bottom = card_top - card_h
+c.setFillColorRGB(*TEAL)
+c.roundRect(cardx, card_bottom, cardw, card_h, 16, fill=1, stroke=0)
+
+cy = card_top - pad
+# badge LIFETIME (emas)
+_bt = "LIFETIME"
+bw = stringWidth(_bt, "Helvetica-Bold", 10) + 26
+c.setFillColorRGB(*GOLD_L)
+c.roundRect(W / 2 - bw / 2, cy - badge_h + 3, bw, badge_h - 3, 9, fill=1, stroke=0)
+c.setFillColorRGB(*GOLD_INK)
+c.setFont("Helvetica-Bold", 10)
+c.drawCentredString(W / 2, cy - badge_h + 8, _bt)
+cy -= badge_h + 14
+
+# judul
+c.setFillColorRGB(1, 1, 1)
+c.setFont("Helvetica-Bold", 18)
+c.drawCentredString(W / 2, cy - 16, "Miliki Bot Ini Selamanya")
+cy -= title_h + 8
+
+# body
+c.setFillColorRGB(0.90, 0.95, 0.92)
+c.setFont("Helvetica", 11)
+for ln in body_lines:
+    c.drawCentredString(W / 2, cy - 11, ln)
+    cy -= 15
+cy -= 18
+
+# CTA pill (emas)
+_cta = "Pesan via DM Instagram  @rekapkeuangan"
+cw = stringWidth(_cta, "Helvetica-Bold", 11.5) + 44
+c.setFillColorRGB(*GOLD_L)
+c.roundRect(W / 2 - cw / 2, cy - cta_h + 4, cw, cta_h - 6, 13, fill=1, stroke=0)
+c.setFillColorRGB(*GOLD_INK)
+c.setFont("Helvetica-Bold", 11.5)
+c.drawCentredString(W / 2, cy - cta_h + 13, _cta)
+
+# Garis tipis + copyright
+copy_y = card_bottom - 34
+c.setStrokeColorRGB(0.85, 0.88, 0.86)
+c.setLineWidth(0.8)
+c.line(W / 2 - 90, copy_y + 20, W / 2 + 90, copy_y + 20)
+c.setFillColorRGB(*TEAL)
+c.setFont("Helvetica-Bold", 11)
+c.drawCentredString(W / 2, copy_y, "Rapikan Keuanganmu")
+c.setFillColorRGB(*GRAY)
+c.setFont("Helvetica", 9.5)
+c.drawCentredString(W / 2, copy_y - 16, "Copyright (c) 2026  -  @rekapkeuangan  -  by @fsiksan")
 
 g.save()
 print("PDF dibuat: panduan-bot-rekap-keuangan.pdf")
