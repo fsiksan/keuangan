@@ -2206,6 +2206,97 @@ async function deleteLangganan(nama) {
   return true;
 }
 
+// Percantik tampilan sheet Langganan (header hijau, mata uang, border, dll).
+async function formatLanggananSheet() {
+  const sheetName = getLanggananSheetName();
+  await ensureSheetWithHeader(sheetName, LANGGANAN_HEADER);
+  const sheetId = await getSheetIdByName(sheetName);
+  if (sheetId == null) return;
+  const client = await auth.getClient();
+  const sheets = google.sheets({ version: 'v4', auth: client });
+
+  const valueRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: ssId(),
+    range: `'${sheetName}'!A2:G`
+  });
+  const dataCount = (valueRes.data.values || []).filter((r) => (r[0] || '').trim()).length;
+  const lastRow = Math.max(dataCount + 1, 2);
+  const font = getSheetFont();
+  const blackBorder = { style: 'SOLID', width: 1, color: { red: 0, green: 0, blue: 0 } };
+  const requests = [];
+
+  // Font ke seluruh area
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 7 },
+      cell: { userEnteredFormat: { textFormat: { fontFamily: font, fontSize: 11 }, verticalAlignment: 'MIDDLE' } },
+      fields: 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.verticalAlignment'
+    }
+  });
+  // Header A1:G1 — latar hijau, teks putih, tebal, rata tengah
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 7 },
+      cell: {
+        userEnteredFormat: {
+          backgroundColor: { red: 0.18, green: 0.49, blue: 0.36 },
+          textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 }, fontFamily: font },
+          horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE'
+        }
+      },
+      fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
+    }
+  });
+  // Nominal (kolom D) — format mata uang, rata kanan
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: 3, endColumnIndex: 4 },
+      cell: { userEnteredFormat: { numberFormat: { type: 'CURRENCY', pattern: '"Rp"#,##0' }, horizontalAlignment: 'RIGHT' } },
+      fields: 'userEnteredFormat.numberFormat,userEnteredFormat.horizontalAlignment'
+    }
+  });
+  // Tanggal Tagih (kolom E) & Jenis (kolom G) — rata tengah
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: 4, endColumnIndex: 5 },
+      cell: { userEnteredFormat: { horizontalAlignment: 'CENTER' } },
+      fields: 'userEnteredFormat.horizontalAlignment'
+    }
+  });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: lastRow, startColumnIndex: 6, endColumnIndex: 7 },
+      cell: { userEnteredFormat: { horizontalAlignment: 'CENTER', textFormat: { bold: true, fontFamily: font } } },
+      fields: 'userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat'
+    }
+  });
+  // Freeze header + filter
+  requests.push({
+    updateSheetProperties: { properties: { sheetId, gridProperties: { frozenRowCount: 1 } }, fields: 'gridProperties.frozenRowCount' }
+  });
+  requests.push({ setBasicFilter: { filter: { range: { sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 7 } } } });
+  // Lebar kolom
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 0, endIndex: 1 }, properties: { pixelSize: 160 }, fields: 'pixelSize' } });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 1, endIndex: 3 }, properties: { pixelSize: 130 }, fields: 'pixelSize' } });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 3, endIndex: 4 }, properties: { pixelSize: 130 }, fields: 'pixelSize' } });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 4, endIndex: 5 }, properties: { pixelSize: 120 }, fields: 'pixelSize' } });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 5, endIndex: 6 }, properties: { pixelSize: 170 }, fields: 'pixelSize' } });
+  requests.push({ updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex: 6, endIndex: 7 }, properties: { pixelSize: 120 }, fields: 'pixelSize' } });
+  // Border seluruh tabel
+  requests.push({
+    updateBorders: {
+      range: { sheetId, startRowIndex: 0, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 7 },
+      top: blackBorder, bottom: blackBorder, left: blackBorder, right: blackBorder, innerHorizontal: blackBorder, innerVertical: blackBorder
+    }
+  });
+
+  try {
+    await sheets.spreadsheets.batchUpdate({ spreadsheetId: ssId(), requestBody: { requests } });
+  } catch (e) {
+    logError('Gagal mempercantik sheet Langganan.', e);
+  }
+}
+
 async function runDueLangganan(day, month, year) {
   const list = await getLangganan();
   const due = list.filter((l) => l.hari === day && l.nominal > 0);
@@ -4265,6 +4356,7 @@ bot.command('langganan', async (ctx) => {
         catatan: '',
         jenis
       });
+      try { await formatLanggananSheet(); } catch (e) { logError('Gagal percantik langganan.', e); }
       const label = jenis === 'pemasukan' ? 'Pemasukan rutin' : 'Langganan';
       return ctx.reply(
         `${label} "${parts[0]}" ditambahkan: ${formatRupiah(nominal)} setiap tanggal ${hari}.`
@@ -4276,6 +4368,7 @@ bot.command('langganan', async (ctx) => {
       const nama = arg.replace(/^hapus\s*/i, '').trim();
       if (!nama) return ctx.reply('Format: /langganan hapus <nama>');
       const ok = await deleteLangganan(nama);
+      if (ok) { try { await formatLanggananSheet(); } catch (e) { logError('Gagal percantik langganan.', e); } }
       return ctx.reply(ok ? `Langganan "${nama}" dihapus.` : `Langganan "${nama}" tidak ditemukan.`);
     }
 
@@ -4295,6 +4388,7 @@ bot.command('langganan', async (ctx) => {
     }
 
     // Default: daftar langganan
+    try { await formatLanggananSheet(); } catch (e) { logError('Gagal percantik langganan.', e); }
     const list = await getLangganan();
     if (list.length === 0) {
       return ctx.reply(
