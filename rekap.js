@@ -2969,6 +2969,17 @@ function quickChartUrl(chartConfig) {
 
 // ----- Transkripsi suara (voice note) -> teks -----
 
+function guessAudioMime(filename) {
+  const ext = String(filename || '').toLowerCase().split('.').pop();
+  const map = {
+    ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg',
+    mp3: 'audio/mpeg', mpeg: 'audio/mpeg', mpga: 'audio/mpeg',
+    m4a: 'audio/mp4', mp4: 'audio/mp4', aac: 'audio/aac',
+    wav: 'audio/wav', webm: 'audio/webm', flac: 'audio/flac'
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
 async function transcribeAudio(buffer, filename) {
   const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -2977,14 +2988,33 @@ async function transcribeAudio(buffer, filename) {
   const baseUrl = (config.openaiBaseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
   const model = config.sttModel || 'whisper-1';
 
-  const form = new FormData();
-  form.append('file', new Blob([buffer]), filename);
-  form.append('model', model);
+  // Bangun body multipart/form-data secara manual dengan boundary standar.
+  // (FormData bawaan undici menghasilkan boundary yang ditolak sebagian server STT.)
+  const boundary = '----RekapUangForm' + Date.now().toString(16) + Math.random().toString(16).slice(2, 8);
+  const CRLF = '\r\n';
+  const pre = [];
+  const field = (name, value) =>
+    `--${boundary}${CRLF}Content-Disposition: form-data; name="${name}"${CRLF}${CRLF}${value}${CRLF}`;
+  pre.push(field('model', model));
+  pre.push(field('response_format', 'json'));
+  pre.push(
+    `--${boundary}${CRLF}` +
+    `Content-Disposition: form-data; name="file"; filename="${filename}"${CRLF}` +
+    `Content-Type: ${guessAudioMime(filename)}${CRLF}${CRLF}`
+  );
+  const body = Buffer.concat([
+    Buffer.from(pre.join(''), 'utf8'),
+    buffer,
+    Buffer.from(`${CRLF}--${boundary}--${CRLF}`, 'utf8')
+  ]);
 
   const res = await fetch(`${baseUrl}/audio/transcriptions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': `multipart/form-data; boundary=${boundary}`
+    },
+    body
   });
 
   if (!res.ok) {
