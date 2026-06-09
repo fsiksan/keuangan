@@ -67,6 +67,34 @@ dibagikan ke email ini sebagai Editor.
 
 ---
 
+## 4. Paket yang Dibeli  *(wajib)*
+Tipe: **Pilihan ganda (Multiple choice)** — Wajib diisi: **Ya**
+
+**Judul pertanyaan:**
+```
+Paket yang kamu beli
+```
+**Opsi:**
+- Bulanan
+- Tahunan
+- Lifetime
+
+---
+
+## 5. Username Telegram  *(opsional)*
+Tipe: **Jawaban singkat (Short answer)** — Wajib diisi: Tidak
+
+**Judul pertanyaan:**
+```
+Username Telegram (opsional)
+```
+**Teks bantuan:**
+```
+Mis. @namakamu — membantu kami verifikasi & mempercepat aktivasi akun.
+```
+
+---
+
 ## Pesan Konfirmasi (setelah submit)
 ```
 Pendaftaran diterima ✅

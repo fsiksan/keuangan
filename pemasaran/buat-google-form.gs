@@ -52,6 +52,17 @@ function buatFormRekapUang() {
       .build();
   emailItem.setValidation(emailRule);
 
+  // 4) Paket yang dibeli (pilihan ganda, wajib)
+  form.addMultipleChoiceItem()
+      .setTitle('Paket yang kamu beli')
+      .setChoiceValues(['Bulanan', 'Tahunan', 'Lifetime'])
+      .setRequired(true);
+
+  // 5) Username Telegram (opsional)
+  form.addTextItem()
+      .setTitle('Username Telegram (opsional)')
+      .setHelpText('Mis. @namakamu - membantu kami verifikasi & mempercepat aktivasi akun.');
+
   Logger.log('Form dibuat!');
   Logger.log('Link kelola (Edit): ' + form.getEditUrl());
   Logger.log('Link isi (bagikan): ' + form.getPublishedUrl());
