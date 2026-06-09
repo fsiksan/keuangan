@@ -2981,16 +2981,19 @@ function guessAudioMime(filename) {
 }
 
 async function transcribeAudio(buffer, filename) {
-  const apiKey = config.openaiApiKey || process.env.OPENAI_API_KEY;
+  // STT bisa pakai provider terpisah (mis. Groq) lewat sttBaseUrl/sttApiKey,
+  // karena sebagian proxy (mis. sumopod) tidak menerima upload audio multipart.
+  const apiKey = config.sttApiKey || config.openaiApiKey || process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error('Transkripsi suara butuh openaiApiKey di rekap.json');
+    throw new Error('Transkripsi suara butuh sttApiKey/openaiApiKey di rekap.json');
   }
-  const baseUrl = (config.openaiBaseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const baseUrl = (config.sttBaseUrl || config.openaiBaseUrl || 'https://api.openai.com/v1')
+    .replace(/\/+$/, '');
   const model = config.sttModel || 'whisper-1';
 
-  // Bangun body multipart/form-data secara manual dengan boundary standar.
-  // (FormData bawaan undici menghasilkan boundary yang ditolak sebagian server STT.)
-  const boundary = '----RekapUangForm' + Date.now().toString(16) + Math.random().toString(16).slice(2, 8);
+  // Bangun body multipart/form-data manual dengan boundary alfanumerik (tanpa
+  // tanda minus di awal) agar diterima parser yang ketat.
+  const boundary = 'RekapUangBoundary' + Date.now().toString(16) + Math.random().toString(16).slice(2, 10);
   const CRLF = '\r\n';
   const pre = [];
   const field = (name, value) =>
@@ -3019,7 +3022,13 @@ async function transcribeAudio(buffer, filename) {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`STT error ${res.status}: ${detail.slice(0, 200)}`);
+    let hint = '';
+    if (res.status === 400 && /content-type|multipart/i.test(detail)) {
+      hint = ' | Provider ini sepertinya tidak mendukung upload audio. ' +
+        'Set sttBaseUrl & sttApiKey ke provider STT (mis. Groq: ' +
+        'https://api.groq.com/openai/v1, model whisper-large-v3).';
+    }
+    throw new Error(`STT error ${res.status}: ${detail.slice(0, 200)}${hint}`);
   }
 
   const data = await res.json();
