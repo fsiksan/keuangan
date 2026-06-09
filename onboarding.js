@@ -70,7 +70,7 @@ async function main() {
     const copy = await drive.files.copy({
       fileId: a1,
       supportsAllDrives: true,
-      requestBody: { name: `Rekap Uang - ${nama}` },
+      requestBody: { name: nama },
     });
     const newId = copy.data.id;
     await shareTo(drive, newId, a2, 'writer');

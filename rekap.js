@@ -597,6 +597,13 @@ async function formatSheetLayout() {
           cell: { userEnteredFormat: { backgroundColor: { red: 0.84, green: 0.93, blue: 0.88 }, textFormat: { bold: true, fontSize: 11, fontFamily: fontFam }, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
           fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.fontFamily,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment'
         } },
+        // Reset latar baris data ke PUTIH agar baris baru tidak ikut warna
+        // judul/header (mis. saat baris baru mewarisi format header).
+        { repeatCell: {
+          range: { sheetId, startRowIndex: 2, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 10 },
+          cell: { userEnteredFormat: { backgroundColor: { red: 1, green: 1, blue: 1 }, textFormat: { bold: false, foregroundColor: { red: 0.13, green: 0.15, blue: 0.18 } } } },
+          fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.bold,userEnteredFormat.textFormat.foregroundColor'
+        } },
         { repeatCell: {
           range: { sheetId, startRowIndex: 2, endRowIndex: lastRow, startColumnIndex: 0, endColumnIndex: 1 },
           cell: { userEnteredFormat: { textFormat: { fontSize: 11, fontFamily: fontFam }, horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE' } },
@@ -3486,8 +3493,8 @@ bot.command('buatkan', async (ctx) => {
     const dClient = await driveAuth.getClient();
     const drive = google.drive({ version: 'v3', auth: dClient });
 
-    // 1) Salin template → spreadsheet baru (taruh di Shared Drive bila diset).
-    const copyBody = { name: `Rekap Uang - ${nama}` };
+    // 1) Salin template → spreadsheet baru (nama file = nama lengkap user).
+    const copyBody = { name: nama };
     if (config.sharedDriveId) copyBody.parents = [config.sharedDriveId];
     const copy = await drive.files.copy({
       fileId: templateId,
