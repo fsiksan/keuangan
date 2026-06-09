@@ -3676,6 +3676,45 @@ bot.use(async (ctx, next) => {
   );
 });
 
+// Paksa rapikan format sheet (judul/header/warna baris). Tanpa input transaksi.
+// /rapikan            -> rapikan sheet milik sendiri
+// /rapikan <TelegramID> -> (admin) rapikan sheet pelanggan tertentu
+bot.command('rapikan', async (ctx) => {
+  try {
+    if (!(await guardOwner(ctx))) return;
+    const arg = (ctx.message.text || '').replace(/^\/rapikan(@\S+)?\s*/i, '').trim();
+
+    let targetSs = ssId();
+    let targetSheet = getSheetName();
+    let label = 'sheet kamu';
+
+    if (arg) {
+      if (!isMultiTenant() || !isAdmin(ctx)) {
+        return ctx.reply('Cukup ketik /rapikan (tanpa argumen) untuk merapikan sheet kamu.');
+      }
+      const t = await resolveTenant(arg);
+      if (!t || !t.spreadsheetId) {
+        return ctx.reply(`Pelanggan ${arg} tidak ditemukan atau belum punya spreadsheet.`);
+      }
+      targetSs = t.spreadsheetId;
+      targetSheet = t.sheetName;
+      label = t.nama || arg;
+    }
+
+    await ctx.reply(`⏳ Merapikan ${label} ...`);
+    await tenantStore.run({ spreadsheetId: targetSs, sheetName: targetSheet }, async () => {
+      await ensureHeader();
+      await formatSheetLayout();
+      try { await updateAnalisaSheet(); } catch (e) { logError('Rapikan: analisa gagal.', e); }
+      try { await formatLanggananSheet(); } catch (e) { logError('Rapikan: langganan gagal.', e); }
+    });
+    return ctx.reply(`Beres! ✅ Format ${label} sudah dirapikan.`);
+  } catch (err) {
+    logError('Gagal /rapikan.', err);
+    return ctx.reply('Gagal merapikan sheet. Cek log server.');
+  }
+});
+
 bot.start(async (ctx) => {
   if (!(await guardOwner(ctx))) return;
 
