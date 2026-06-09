@@ -98,7 +98,10 @@ function buildReceiptSummary(p) {
   if (p.item) lines.push(`Item: ${p.item}`);
   lines.push(`Kategori: ${p.kategori}`);
   if (p.toko) lines.push(`Toko: ${p.toko}`);
-  lines.push(`Total: Rp${Math.round(p.total).toLocaleString('id-ID')}`);
+  lines.push(
+    `Total: Rp${Math.round(p.total).toLocaleString('id-ID')}` +
+    (p.totalNote ? ` (≈ ${p.totalNote})` : '')
+  );
   if (Array.isArray(p.items) && p.items.length > 0) {
     lines.push('');
     lines.push('Rincian:');
@@ -1321,7 +1324,10 @@ const RECEIPT_PROMPT =
   '(contoh: Indomaret, Alfamart, Warkop Agam, KAI, Starbucks). ' +
   'Kosongkan jika benar-benar tidak tertera.\n' +
   '- total: nominal AKHIR yang dibayar. Cari kata "Grand Total", "Total Belanja", ' +
-  '"Total Bayar", atau "Total". Tulis sebagai angka Rupiah tanpa titik/koma/Rp.\n' +
+  '"Total Bayar", atau "Total". Tulis sebagai ANGKA saja sesuai mata uang aslinya ' +
+  '(boleh desimal seperti 8.71 untuk USD), tanpa simbol mata uang & tanpa pemisah ribuan.\n' +
+  '- mata_uang: kode mata uang nominal pada struk. "USD" bila ada tanda $ atau tulisan ' +
+  'USD/dollar, "IDR" bila Rupiah/Rp. Jika ragu pilih "IDR".\n' +
   '- tanggal: tanggal transaksi pada struk, format DD/MM/YYYY. Kosongkan jika tidak ada.\n' +
   '- item: nama/jenis singkat pembelian (mis. "Belanja harian", "Makan", "Bensin", "Tiket kereta").\n' +
   '- kategori: tentukan dari jenis pembelian. Pilih SALAH SATU (gunakan kata persis ini):\n' +
@@ -1348,6 +1354,7 @@ const RECEIPT_SCHEMA = {
     item: { type: 'string' },
     kategori: { type: 'string' },
     total: { type: 'number' },
+    mata_uang: { type: 'string' },
     items: {
       type: 'array',
       items: {
@@ -1361,7 +1368,7 @@ const RECEIPT_SCHEMA = {
       }
     }
   },
-  required: ['is_receipt', 'toko', 'tanggal', 'item', 'kategori', 'total', 'items'],
+  required: ['is_receipt', 'toko', 'tanggal', 'item', 'kategori', 'total', 'mata_uang', 'items'],
   additionalProperties: false
 };
 
@@ -1369,7 +1376,7 @@ const RECEIPT_JSON_HINT =
   '\n\nKembalikan HANYA JSON valid (tanpa teks lain, tanpa markdown) dengan ' +
   'bentuk persis:\n' +
   '{"is_receipt": boolean, "toko": string, "tanggal": string, ' +
-  '"item": string, "kategori": string, "total": number, ' +
+  '"item": string, "kategori": string, "total": number, "mata_uang": string, ' +
   '"items": [{"nama": string, "harga": number}]}';
 
 function getLlmProvider() {
@@ -1392,6 +1399,16 @@ function coerceAmountNumber(value) {
   if (typeof value === 'string') {
     const digits = value.replace(/[^\d]/g, '');
     return digits ? Number(digits) : 0;
+  }
+  return 0;
+}
+
+// Ambil nilai numerik APA ADANYA (boleh desimal), untuk konversi mata uang asing.
+function coerceAmountFloat(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') {
+    const n = parseLocalizedNumber(value.replace(/[^\d.,]/g, ''));
+    return n || 0;
   }
   return 0;
 }
@@ -5020,8 +5037,28 @@ bot.on(['photo', 'document'], async (ctx) => {
     const parsed = await parseReceiptImage(base64Data, mediaType);
     logInfo('Hasil baca struk: ' + JSON.stringify(parsed));
 
+    // Deteksi mata uang. Bila USD ($), konversi ke Rupiah (samakan dgn teks "$"/usd/usdt).
+    const curRaw = (parsed && parsed.mata_uang ? String(parsed.mata_uang) : '').toUpperCase();
+    const totalRaw = String(parsed && parsed.total != null ? parsed.total : '');
+    const isUsd = /USD|DOLLAR|\$/.test(curRaw) || /\$|usd/i.test(totalRaw);
+
+    let total = 0;
+    let totalNote = '';
+    let usdRate = 0;
+    if (parsed) {
+      if (isUsd) {
+        const amt = coerceAmountFloat(parsed.total);
+        if (amt > 0) {
+          usdRate = await getUsdToIdrRate();
+          total = Math.round(amt * usdRate);
+          totalNote = '$' + amt.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        }
+      } else {
+        total = coerceAmountNumber(parsed.total);
+      }
+    }
+
     // Jika total terbaca, anggap struk valid (model benar-benar "melihat" gambar).
-    const total = parsed ? coerceAmountNumber(parsed.total) : 0;
     if (!total || total <= 0) {
       return ctx.reply(
         'Tidak bisa membaca total dari struk.\n' +
@@ -5041,13 +5078,22 @@ bot.on(['photo', 'document'], async (ctx) => {
       tanggal = new Date().toLocaleDateString('id-ID', { timeZone: getTimezone() });
     }
 
+    let items = Array.isArray(parsed.items) ? parsed.items : [];
+    if (isUsd && usdRate > 0) {
+      items = items.map((it) => ({
+        nama: it && it.nama,
+        harga: Math.round(coerceAmountFloat(it && it.harga) * usdRate)
+      }));
+    }
+
     const pending = {
       tanggal,
       item: (parsed.item || '').trim() || (parsed.toko || '').trim() || 'Belanja',
       kategori: normalizeCategory(parsed.kategori || '', 'pengeluaran'),
       toko: (parsed.toko || '').trim(),
       total: Math.round(total),
-      items: Array.isArray(parsed.items) ? parsed.items : [],
+      totalNote,
+      items,
       pencatat: getUserName(ctx)
     };
 
