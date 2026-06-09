@@ -73,6 +73,8 @@ const anthropic = anthropicApiKey
 
 // Menyimpan hasil baca struk sementara (menunggu konfirmasi tombol).
 const pendingReceipts = new Map();
+// Menunggu user mengetik nominal manual untuk struk. key: String(userId) -> { id, chatId, msgId }
+const awaitingReceiptAmount = new Map();
 
 // Baris transaksi terakhir yang dihapus (untuk /batal).
 let lastDeletedRow = null;
@@ -94,6 +96,7 @@ const RECEIPT_CATEGORIES = [
 // Total "bagianmu": jika sebagian item dicentang -> jumlah item terpilih;
 // jika semua terpilih (atau tidak ada rincian) -> total struk penuh.
 function receiptSelectedTotal(p) {
+  if (p.manualTotal != null && p.manualTotal > 0) return Math.round(p.manualTotal);
   const items = Array.isArray(p.items) ? p.items : [];
   if (items.length > 0 && Array.isArray(p.selected)) {
     const allOn = p.selected.every(Boolean);
@@ -128,11 +131,14 @@ function buildReceiptSummary(p) {
       lines.push(`${mark}${item.nama}: Rp${harga.toLocaleString('id-ID')}`);
     });
   }
-  if (hasSel) {
-    const allOn = p.selected.every(Boolean);
+  const manual = p.manualTotal != null && p.manualTotal > 0;
+  if (hasSel || manual) {
     const share = receiptSelectedTotal(p);
+    let note = '';
+    if (manual) note = ' — diatur manual ✏️';
+    else if (hasSel && !p.selected.every(Boolean)) note = ' — split bill';
     lines.push('');
-    lines.push(`💰 Yang dicatat (bagianmu): Rp${share.toLocaleString('id-ID')}` + (allOn ? '' : ' — split bill'));
+    lines.push(`💰 Yang dicatat (bagianmu): Rp${share.toLocaleString('id-ID')}${note}`);
   }
   return lines.join('\n');
 }
@@ -166,6 +172,7 @@ function receiptKeyboard(id, current, p) {
     );
   }
 
+  rows.push([{ text: '✏️ Edit nominal (ketik manual)', callback_data: `rc|edit|${id}` }]);
   rows.push([
     { text: '💾 Simpan', callback_data: `rc|save|${id}` },
     { text: '❌ Batal', callback_data: `rc|cancel|${id}` }
@@ -5533,6 +5540,32 @@ bot.on('text', async (ctx) => {
     const text = ctx.message.text.trim();
     if (text.startsWith('/')) return;
 
+    // Sedang menunggu nominal manual untuk struk? Tafsirkan teks ini sebagai nominal.
+    const awaitKey = String(ctx.from?.id || '');
+    if (awaitingReceiptAmount.has(awaitKey)) {
+      const aw = awaitingReceiptAmount.get(awaitKey);
+      const p = pendingReceipts.get(aw.id);
+      if (!p) { awaitingReceiptAmount.delete(awaitKey); }
+      else {
+        const amt = await parseAmountToNumber(text);
+        if (!amt || amt <= 0) {
+          return ctx.reply('Nominal tidak valid. Ketik lagi mis. 50000 atau 50rb (atau tekan Batal di struk).');
+        }
+        p.manualTotal = Math.round(amt);
+        pendingReceipts.set(aw.id, p);
+        awaitingReceiptAmount.delete(awaitKey);
+        try {
+          await ctx.telegram.editMessageText(aw.chatId, aw.msgId, undefined,
+            buildReceiptSummary(p) + '\n\nNominal bagianmu sudah diatur ✏️. Tekan Simpan 👇',
+            { reply_markup: receiptKeyboard(aw.id, p.kategori, p) });
+        } catch (e) {
+          await ctx.reply(buildReceiptSummary(p) + '\n\nNominal diatur ✏️. Tekan Simpan 👇',
+            { reply_markup: receiptKeyboard(aw.id, p.kategori, p) });
+        }
+        return ctx.reply(`Oke, bagianmu diset Rp${p.manualTotal.toLocaleString('id-ID')}. Tekan Simpan di struk ya 👆`);
+      }
+    }
+
     if (await handleKeywordText(ctx, text)) return;
 
     const reply = await processTransactionText(ctx, text);
@@ -5679,6 +5712,7 @@ bot.on('callback_query', async (ctx) => {
 
     if (action === 'cancel') {
       pendingReceipts.delete(id);
+      awaitingReceiptAmount.delete(String(ctx.from?.id || ''));
       await ctx.answerCbQuery('Dibatalkan');
       try { await ctx.editMessageText('Struk dibatalkan ❌'); } catch (e) {}
       return;
@@ -5708,6 +5742,7 @@ bot.on('callback_query', async (ctx) => {
       const i = Number(parts[3]);
       if (Array.isArray(pending.selected) && i >= 0 && i < pending.selected.length) {
         pending.selected[i] = !pending.selected[i];
+        pending.manualTotal = null; // centang item membatalkan nominal manual
         pendingReceipts.set(id, pending);
       }
       await ctx.answerCbQuery();
@@ -5719,6 +5754,7 @@ bot.on('callback_query', async (ctx) => {
       if (Array.isArray(pending.selected)) {
         const allOn = pending.selected.every(Boolean);
         pending.selected = pending.selected.map(() => !allOn);
+        pending.manualTotal = null;
         pendingReceipts.set(id, pending);
       }
       await ctx.answerCbQuery();
@@ -5726,7 +5762,24 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
+    if (action === 'edit') {
+      const msg = ctx.callbackQuery.message;
+      awaitingReceiptAmount.set(String(ctx.from.id), {
+        id, chatId: msg.chat.id, msgId: msg.message_id
+      });
+      await ctx.answerCbQuery('Ketik nominal bagianmu di chat');
+      try {
+        await ctx.editMessageText(
+          buildReceiptSummary(pending) +
+            '\n\n✏️ Ketik nominal bagianmu di chat (mis. 50000, 50rb). Atau tetap pakai centang item.',
+          { reply_markup: receiptKeyboard(id, pending.kategori, pending) }
+        );
+      } catch (e) {}
+      return;
+    }
+
     if (action === 'save') {
+      awaitingReceiptAmount.delete(String(ctx.from.id));
       const finalTotal = receiptSelectedTotal(pending);
       if (!finalTotal || finalTotal <= 0) {
         await ctx.answerCbQuery('Pilih minimal 1 item dulu ya');
@@ -5735,7 +5788,8 @@ bot.on('callback_query', async (ctx) => {
       await ctx.answerCbQuery('Menyimpan...');
       await ensureHeader();
       const its = Array.isArray(pending.items) ? pending.items : [];
-      const isSplit = its.length > 0 && Array.isArray(pending.selected) && !pending.selected.every(Boolean);
+      const manualSet = pending.manualTotal != null && pending.manualTotal > 0;
+      const isSplit = manualSet || (its.length > 0 && Array.isArray(pending.selected) && !pending.selected.every(Boolean));
       const pengeluaran = 'Rp' + Math.round(finalTotal).toLocaleString('id-ID');
       const receiptTxnId = await appendRow([
         pending.tanggal,
