@@ -1,6 +1,6 @@
 # Email Selamat Datang Pelanggan — Rekap Uang
 
-Ganti `[NAMA]`, `[LINK_BOT]`, `[LINK_SHEET]` sebelum dikirim.
+Ganti `[NAMA]` dan `[LINK_SHEET]` sebelum dikirim. (Link bot sudah terisi.)
 Ada 2 versi: **email biasa (teks)** dan **versi singkat untuk WhatsApp/Telegram**.
 
 ---
@@ -21,7 +21,7 @@ Mulai sekarang, mencatat keuangan semudah chatting — semua otomatis rapi
 ke Google Sheets lengkap dengan laporan & grafik.
 
 🔗 AKSES KAMU
-• Bot Telegram   : [LINK_BOT]
+• Bot Telegram   : https://t.me/rekapuang_id_bot
 • Google Sheet   : [LINK_SHEET]
 
 ✍️ CARA MULAI (3 langkah)
@@ -53,7 +53,7 @@ Copyright 2026 © @rekapuang.id
 Halo [NAMA]! 👋 Akun *Rekap Uang* kamu sudah AKTIF 🎉
 
 Akses kamu:
-💬 Bot Telegram: [LINK_BOT]
+💬 Bot Telegram: https://t.me/rekapuang_id_bot
 📊 Google Sheet: [LINK_SHEET]
 
 Cara mulai:
