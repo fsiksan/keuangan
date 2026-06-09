@@ -1657,6 +1657,7 @@ async function ensureTenantSheets() {
   await ensureSheetWithHeader(getHutangSheetName(), ['Nama', 'Jenis', 'Nominal', 'Catatan', 'Tanggal']);
   await ensureSheetWithHeader(getNeracaSheetName(), NERACA_HEADER);
   await ensureSheetWithHeader(getBudgetSheetName(), ['Kategori', 'Budget Bulanan']);
+  await ensureSheetExists(getAnalisaSheetName()); // isi diatur updateAnalisaSheet
   if (!isMultiTenant()) {
     await ensureSheetWithHeader(getKategoriMapSheetName(), ['Kata Kunci', 'Kategori']);
   }
@@ -3652,6 +3653,8 @@ bot.command('buatkan', async (ctx) => {
         await ensureHeader();
         await ensureTenantSheets();
         await formatSheetLayout();
+        try { await updateAnalisaSheet(); } catch (e) { logError('Setup: analisa gagal.', e); }
+        try { await formatLanggananSheet(); } catch (e) { logError('Setup: langganan gagal.', e); }
       });
     } catch (e) {
       logError('Gagal menyiapkan tab pelanggan baru.', e);
