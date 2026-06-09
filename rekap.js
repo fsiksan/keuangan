@@ -91,6 +91,21 @@ const RECEIPT_CATEGORIES = [
   'Hiburan', 'Tagihan', 'Pendidikan', 'Belanja', 'Lainnya'
 ];
 
+// Total "bagianmu": jika sebagian item dicentang -> jumlah item terpilih;
+// jika semua terpilih (atau tidak ada rincian) -> total struk penuh.
+function receiptSelectedTotal(p) {
+  const items = Array.isArray(p.items) ? p.items : [];
+  if (items.length > 0 && Array.isArray(p.selected)) {
+    const allOn = p.selected.every(Boolean);
+    if (!allOn) {
+      let sum = 0;
+      items.forEach((it, i) => { if (p.selected[i]) sum += coerceAmountNumber(it.harga); });
+      return sum;
+    }
+  }
+  return Math.round(p.total);
+}
+
 function buildReceiptSummary(p) {
   const lines = [];
   lines.push('Hasil baca struk 🧾');
@@ -98,40 +113,64 @@ function buildReceiptSummary(p) {
   if (p.item) lines.push(`Item: ${p.item}`);
   lines.push(`Kategori: ${p.kategori}`);
   if (p.toko) lines.push(`Toko: ${p.toko}`);
+  const items = Array.isArray(p.items) ? p.items : [];
+  const hasSel = items.length > 0 && Array.isArray(p.selected);
   lines.push(
-    `Total: Rp${Math.round(p.total).toLocaleString('id-ID')}` +
+    `Total struk: Rp${Math.round(p.total).toLocaleString('id-ID')}` +
     (p.totalNote ? ` (≈ ${p.totalNote})` : '')
   );
-  if (Array.isArray(p.items) && p.items.length > 0) {
+  if (items.length > 0) {
     lines.push('');
-    lines.push('Rincian:');
-    for (const item of p.items.slice(0, 15)) {
+    lines.push(hasSel ? 'Rincian (centang bagianmu via tombol):' : 'Rincian:');
+    items.slice(0, 20).forEach((item, i) => {
       const harga = coerceAmountNumber(item.harga);
-      lines.push(`- ${item.nama}: Rp${harga.toLocaleString('id-ID')}`);
-    }
+      const mark = hasSel ? (p.selected[i] ? '✅ ' : '⬜ ') : '- ';
+      lines.push(`${mark}${item.nama}: Rp${harga.toLocaleString('id-ID')}`);
+    });
+  }
+  if (hasSel) {
+    const allOn = p.selected.every(Boolean);
+    const share = receiptSelectedTotal(p);
+    lines.push('');
+    lines.push(`💰 Yang dicatat (bagianmu): Rp${share.toLocaleString('id-ID')}` + (allOn ? '' : ' — split bill'));
   }
   return lines.join('\n');
 }
 
-function receiptKeyboard(id, current) {
-  const catRows = [];
+function receiptKeyboard(id, current, p) {
+  const rows = [];
+  const items = (p && Array.isArray(p.items)) ? p.items : [];
+  const hasSel = items.length > 0 && Array.isArray(p.selected);
+
+  // Tombol pilih item (untuk split bill) — satu tombol per item.
+  if (hasSel) {
+    const allOn = p.selected.every(Boolean);
+    rows.push([{ text: allOn ? '⬜ Kosongkan semua' : '✅ Pilih semua', callback_data: `rc|all|${id}` }]);
+    items.slice(0, 20).forEach((it, i) => {
+      const nm = String(it.nama || 'item').slice(0, 22);
+      const hg = coerceAmountNumber(it.harga);
+      rows.push([{
+        text: `${p.selected[i] ? '✅' : '⬜'} ${nm} • Rp${hg.toLocaleString('id-ID')}`,
+        callback_data: `rc|it|${id}|${i}`
+      }]);
+    });
+  }
+
+  // Pilihan kategori
   for (let i = 0; i < RECEIPT_CATEGORIES.length; i += 3) {
-    catRows.push(
+    rows.push(
       RECEIPT_CATEGORIES.slice(i, i + 3).map((c) => ({
         text: c === current ? `✅ ${c}` : c,
         callback_data: `rc|cat|${id}|${c}`
       }))
     );
   }
-  return {
-    inline_keyboard: [
-      ...catRows,
-      [
-        { text: '💾 Simpan', callback_data: `rc|save|${id}` },
-        { text: '❌ Batal', callback_data: `rc|cancel|${id}` }
-      ]
-    ]
-  };
+
+  rows.push([
+    { text: '💾 Simpan', callback_data: `rc|save|${id}` },
+    { text: '❌ Batal', callback_data: `rc|cancel|${id}` }
+  ]);
+  return { inline_keyboard: rows };
 }
 
 const auth = new google.auth.GoogleAuth({
@@ -5140,16 +5179,19 @@ bot.on(['photo', 'document'], async (ctx) => {
       total: Math.round(total),
       totalNote,
       items,
+      selected: items.map(() => true), // default: semua tercatat (bukan split)
       pencatat: getUserName(ctx)
     };
 
     const id = Math.random().toString(36).slice(2, 8);
     pendingReceipts.set(id, pending);
 
+    const tip = items.length > 0
+      ? '\n\nSplit bill? Centang item yang jadi bagianmu lewat tombol di bawah (default: semua). Lalu tekan Simpan 👇'
+      : '\n\nKategorinya pas? Kalau perlu ganti dulu, terus tekan Simpan ya 👇';
     return ctx.reply(
-      buildReceiptSummary(pending) +
-        '\n\nKategorinya pas? Kalau perlu ganti dulu, terus tekan Simpan ya 👇',
-      { reply_markup: receiptKeyboard(id, pending.kategori) }
+      buildReceiptSummary(pending) + tip,
+      { reply_markup: receiptKeyboard(id, pending.kategori, pending) }
     );
   } catch (err) {
     logError('Gagal membaca struk.', err);
@@ -5642,24 +5684,59 @@ bot.on('callback_query', async (ctx) => {
       return;
     }
 
+    // Helper: render ulang ringkasan + keyboard (untuk toggle item/kategori)
+    const rerender = async () => {
+      const tip = (Array.isArray(pending.items) && pending.items.length > 0)
+        ? '\n\nCentang item yang jadi bagianmu, lalu tekan Simpan 👇'
+        : '\n\nKategorinya pas? Kalau perlu ganti dulu, terus tekan Simpan ya 👇';
+      try {
+        await ctx.editMessageText(buildReceiptSummary(pending) + tip,
+          { reply_markup: receiptKeyboard(id, pending.kategori, pending) });
+      } catch (e) {}
+    };
+
     if (action === 'cat') {
       const cat = parts.slice(3).join('|');
       pending.kategori = cat;
       pendingReceipts.set(id, pending);
       await ctx.answerCbQuery(`Kategori: ${cat}`);
-      try {
-        await ctx.editMessageText(
-          buildReceiptSummary(pending) + '\n\nKategorinya pas? Kalau perlu ganti dulu, terus tekan Simpan ya 👇',
-          { reply_markup: receiptKeyboard(id, cat) }
-        );
-      } catch (e) {}
+      await rerender();
+      return;
+    }
+
+    if (action === 'it') {
+      const i = Number(parts[3]);
+      if (Array.isArray(pending.selected) && i >= 0 && i < pending.selected.length) {
+        pending.selected[i] = !pending.selected[i];
+        pendingReceipts.set(id, pending);
+      }
+      await ctx.answerCbQuery();
+      await rerender();
+      return;
+    }
+
+    if (action === 'all') {
+      if (Array.isArray(pending.selected)) {
+        const allOn = pending.selected.every(Boolean);
+        pending.selected = pending.selected.map(() => !allOn);
+        pendingReceipts.set(id, pending);
+      }
+      await ctx.answerCbQuery();
+      await rerender();
       return;
     }
 
     if (action === 'save') {
+      const finalTotal = receiptSelectedTotal(pending);
+      if (!finalTotal || finalTotal <= 0) {
+        await ctx.answerCbQuery('Pilih minimal 1 item dulu ya');
+        return;
+      }
       await ctx.answerCbQuery('Menyimpan...');
       await ensureHeader();
-      const pengeluaran = 'Rp' + Math.round(pending.total).toLocaleString('id-ID');
+      const its = Array.isArray(pending.items) ? pending.items : [];
+      const isSplit = its.length > 0 && Array.isArray(pending.selected) && !pending.selected.every(Boolean);
+      const pengeluaran = 'Rp' + Math.round(finalTotal).toLocaleString('id-ID');
       const receiptTxnId = await appendRow([
         pending.tanggal,
         pending.item || 'Belanja',
@@ -5667,7 +5744,7 @@ bot.on('callback_query', async (ctx) => {
         pending.toko || 'Lainnya',
         '',
         pengeluaran,
-        'Struk',
+        isSplit ? 'Struk (split bill)' : 'Struk',
         pending.pencatat || getUserName(ctx),
         'Kas'
       ]);
