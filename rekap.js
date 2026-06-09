@@ -93,19 +93,26 @@ const RECEIPT_CATEGORIES = [
   'Hiburan', 'Tagihan', 'Pendidikan', 'Belanja', 'Lainnya'
 ];
 
-// Total "bagianmu": jika sebagian item dicentang -> jumlah item terpilih;
-// jika semua terpilih (atau tidak ada rincian) -> total struk penuh.
+// Bagian yang dipakai untuk satu item: nominal bagianmu (jika diisi) atau harga penuh.
+function itemShareValue(p, i) {
+  const it = (p.items || [])[i] || {};
+  if (Array.isArray(p.share) && p.share[i] != null) return Math.round(p.share[i]);
+  return coerceAmountNumber(it.harga);
+}
+
+// Total bagianmu (yang dicatat).
 function receiptSelectedTotal(p) {
-  if (p.manualTotal != null && p.manualTotal > 0) return Math.round(p.manualTotal);
   const items = Array.isArray(p.items) ? p.items : [];
   if (items.length > 0 && Array.isArray(p.selected)) {
+    const anyShare = Array.isArray(p.share) && p.share.some((s) => s != null);
     const allOn = p.selected.every(Boolean);
-    if (!allOn) {
-      let sum = 0;
-      items.forEach((it, i) => { if (p.selected[i]) sum += coerceAmountNumber(it.harga); });
-      return sum;
-    }
+    // Normal (semua tercentang & tak ada bagian khusus) -> total struk penuh (termasuk pajak/diskon).
+    if (allOn && !anyShare) return Math.round(p.total);
+    let sum = 0;
+    items.forEach((it, i) => { if (p.selected[i]) sum += itemShareValue(p, i); });
+    return sum;
   }
+  if (p.manualTotal != null && p.manualTotal > 0) return Math.round(p.manualTotal);
   return Math.round(p.total);
 }
 
@@ -118,17 +125,20 @@ function buildReceiptSummary(p) {
   if (p.toko) lines.push(`Toko: ${p.toko}`);
   const items = Array.isArray(p.items) ? p.items : [];
   const hasSel = items.length > 0 && Array.isArray(p.selected);
+  const anyShare = Array.isArray(p.share) && p.share.some((s) => s != null);
   lines.push(
     `Total struk: Rp${Math.round(p.total).toLocaleString('id-ID')}` +
     (p.totalNote ? ` (≈ ${p.totalNote})` : '')
   );
   if (items.length > 0) {
     lines.push('');
-    lines.push(hasSel ? 'Rincian (centang bagianmu via tombol):' : 'Rincian:');
+    lines.push(hasSel ? 'Rincian (centang & atur bagianmu via tombol):' : 'Rincian:');
     items.slice(0, 20).forEach((item, i) => {
       const harga = coerceAmountNumber(item.harga);
       const mark = hasSel ? (p.selected[i] ? '✅ ' : '⬜ ') : '- ';
-      lines.push(`${mark}${item.nama}: Rp${harga.toLocaleString('id-ID')}`);
+      const shareSet = Array.isArray(p.share) && p.share[i] != null;
+      const extra = shareSet ? `  → bagianmu Rp${Math.round(p.share[i]).toLocaleString('id-ID')}` : '';
+      lines.push(`${mark}${item.nama}: Rp${harga.toLocaleString('id-ID')}${extra}`);
     });
   }
   const manual = p.manualTotal != null && p.manualTotal > 0;
@@ -136,9 +146,9 @@ function buildReceiptSummary(p) {
     const share = receiptSelectedTotal(p);
     let note = '';
     if (manual) note = ' — diatur manual ✏️';
-    else if (hasSel && !p.selected.every(Boolean)) note = ' — split bill';
+    else if (hasSel && (!p.selected.every(Boolean) || anyShare)) note = ' — split bill';
     lines.push('');
-    lines.push(`💰 Yang dicatat (bagianmu): Rp${share.toLocaleString('id-ID')}${note}`);
+    lines.push(`💰 Bagianmu (yang dicatat): Rp${share.toLocaleString('id-ID')}${note}`);
   }
   return lines.join('\n');
 }
@@ -148,17 +158,24 @@ function receiptKeyboard(id, current, p) {
   const items = (p && Array.isArray(p.items)) ? p.items : [];
   const hasSel = items.length > 0 && Array.isArray(p.selected);
 
-  // Tombol pilih item (untuk split bill) — satu tombol per item.
+  // Per item: tombol centang (kiri) + tombol atur bagianmu (kanan).
   if (hasSel) {
     const allOn = p.selected.every(Boolean);
     rows.push([{ text: allOn ? '⬜ Kosongkan semua' : '✅ Pilih semua', callback_data: `rc|all|${id}` }]);
     items.slice(0, 20).forEach((it, i) => {
-      const nm = String(it.nama || 'item').slice(0, 22);
+      const nm = String(it.nama || 'item').slice(0, 16);
       const hg = coerceAmountNumber(it.harga);
-      rows.push([{
-        text: `${p.selected[i] ? '✅' : '⬜'} ${nm} • Rp${hg.toLocaleString('id-ID')}`,
-        callback_data: `rc|it|${id}|${i}`
-      }]);
+      const shareSet = Array.isArray(p.share) && p.share[i] != null;
+      rows.push([
+        {
+          text: `${p.selected[i] ? '✅' : '⬜'} ${nm} • Rp${hg.toLocaleString('id-ID')}`,
+          callback_data: `rc|it|${id}|${i}`
+        },
+        {
+          text: shareSet ? `✏️ Rp${Math.round(p.share[i]).toLocaleString('id-ID')}` : '✏️ bagianmu',
+          callback_data: `rc|ei|${id}|${i}`
+        }
+      ]);
     });
   }
 
@@ -172,7 +189,10 @@ function receiptKeyboard(id, current, p) {
     );
   }
 
-  rows.push([{ text: '✏️ Edit nominal (ketik manual)', callback_data: `rc|edit|${id}` }]);
+  // Struk tanpa rincian item: sediakan edit nominal global.
+  if (!hasSel) {
+    rows.push([{ text: '✏️ Edit nominal (ketik manual)', callback_data: `rc|edit|${id}` }]);
+  }
   rows.push([
     { text: '💾 Simpan', callback_data: `rc|save|${id}` },
     { text: '❌ Batal', callback_data: `rc|cancel|${id}` }
@@ -5187,6 +5207,7 @@ bot.on(['photo', 'document'], async (ctx) => {
       totalNote,
       items,
       selected: items.map(() => true), // default: semua tercatat (bukan split)
+      share: items.map(() => null),    // bagianmu per item (null = pakai harga penuh)
       pencatat: getUserName(ctx)
     };
 
@@ -5551,18 +5572,31 @@ bot.on('text', async (ctx) => {
         if (!amt || amt <= 0) {
           return ctx.reply('Nominal tidak valid. Ketik lagi mis. 50000 atau 50rb (atau tekan Batal di struk).');
         }
-        p.manualTotal = Math.round(amt);
+        const val = Math.round(amt);
+        let okMsg;
+        if (aw.itemIndex != null && aw.itemIndex >= 0) {
+          // Bagianmu untuk satu item tertentu.
+          if (!Array.isArray(p.share)) p.share = (p.items || []).map(() => null);
+          p.share[aw.itemIndex] = val;
+          if (Array.isArray(p.selected)) p.selected[aw.itemIndex] = true;
+          const nm = String((p.items[aw.itemIndex] || {}).nama || 'item').slice(0, 30);
+          okMsg = `Oke, bagianmu untuk "${nm}" = Rp${val.toLocaleString('id-ID')}. Atur item lain atau tekan Simpan 👆`;
+        } else {
+          // Nominal manual global (struk tanpa rincian item).
+          p.manualTotal = val;
+          okMsg = `Oke, bagianmu diset Rp${val.toLocaleString('id-ID')}. Tekan Simpan di struk ya 👆`;
+        }
         pendingReceipts.set(aw.id, p);
         awaitingReceiptAmount.delete(awaitKey);
         try {
           await ctx.telegram.editMessageText(aw.chatId, aw.msgId, undefined,
-            buildReceiptSummary(p) + '\n\nNominal bagianmu sudah diatur ✏️. Tekan Simpan 👇',
+            buildReceiptSummary(p) + '\n\nBagianmu diperbarui ✏️. Tekan Simpan 👇',
             { reply_markup: receiptKeyboard(aw.id, p.kategori, p) });
         } catch (e) {
-          await ctx.reply(buildReceiptSummary(p) + '\n\nNominal diatur ✏️. Tekan Simpan 👇',
+          await ctx.reply(buildReceiptSummary(p) + '\n\nBagianmu diperbarui ✏️. Tekan Simpan 👇',
             { reply_markup: receiptKeyboard(aw.id, p.kategori, p) });
         }
-        return ctx.reply(`Oke, bagianmu diset Rp${p.manualTotal.toLocaleString('id-ID')}. Tekan Simpan di struk ya 👆`);
+        return ctx.reply(okMsg);
       }
     }
 
@@ -5765,13 +5799,35 @@ bot.on('callback_query', async (ctx) => {
     if (action === 'edit') {
       const msg = ctx.callbackQuery.message;
       awaitingReceiptAmount.set(String(ctx.from.id), {
-        id, chatId: msg.chat.id, msgId: msg.message_id
+        id, chatId: msg.chat.id, msgId: msg.message_id, itemIndex: -1
       });
       await ctx.answerCbQuery('Ketik nominal bagianmu di chat');
       try {
         await ctx.editMessageText(
           buildReceiptSummary(pending) +
             '\n\n✏️ Ketik nominal bagianmu di chat (mis. 50000, 50rb). Atau tetap pakai centang item.',
+          { reply_markup: receiptKeyboard(id, pending.kategori, pending) }
+        );
+      } catch (e) {}
+      return;
+    }
+
+    // Atur bagianmu untuk SATU item tertentu.
+    if (action === 'ei') {
+      const i = Number(parts[3]);
+      const it = (pending.items || [])[i];
+      if (!it) { await ctx.answerCbQuery(); return; }
+      const msg = ctx.callbackQuery.message;
+      awaitingReceiptAmount.set(String(ctx.from.id), {
+        id, chatId: msg.chat.id, msgId: msg.message_id, itemIndex: i
+      });
+      const hg = coerceAmountNumber(it.harga);
+      await ctx.answerCbQuery('Ketik bagianmu untuk item ini');
+      try {
+        await ctx.editMessageText(
+          buildReceiptSummary(pending) +
+            `\n\n✏️ Ketik bagianmu untuk "${String(it.nama || 'item').slice(0, 30)}" ` +
+            `(harga Rp${hg.toLocaleString('id-ID')}) di chat, mis. ${Math.round(hg / 2)}.`,
           { reply_markup: receiptKeyboard(id, pending.kategori, pending) }
         );
       } catch (e) {}
@@ -5789,7 +5845,9 @@ bot.on('callback_query', async (ctx) => {
       await ensureHeader();
       const its = Array.isArray(pending.items) ? pending.items : [];
       const manualSet = pending.manualTotal != null && pending.manualTotal > 0;
-      const isSplit = manualSet || (its.length > 0 && Array.isArray(pending.selected) && !pending.selected.every(Boolean));
+      const anyShareSet = Array.isArray(pending.share) && pending.share.some((s) => s != null);
+      const isSplit = manualSet || anyShareSet ||
+        (its.length > 0 && Array.isArray(pending.selected) && !pending.selected.every(Boolean));
       const pengeluaran = 'Rp' + Math.round(finalTotal).toLocaleString('id-ID');
       const receiptTxnId = await appendRow([
         pending.tanggal,
