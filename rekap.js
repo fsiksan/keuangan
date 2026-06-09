@@ -5680,8 +5680,14 @@ bot.on(['voice', 'audio'], async (ctx) => {
       transcript = await transcribeAudio(buffer, filename);
     } catch (e) {
       logError('Transkripsi gagal.', e);
+      let extra = '';
+      if (isAdmin(ctx)) {
+        const d = String((e && e.message) || '');
+        if (d) extra = `\n\n🔎 (admin) ${d.slice(0, 300)}`;
+      }
       return ctx.reply(
-        'Gagal transkripsi suara. Pastikan openaiApiKey & sttModel mendukung audio.'
+        'Gagal transkripsi suara. Pastikan sttBaseUrl/sttApiKey & sttModel ' +
+        'mendukung audio (mis. Groq whisper-large-v3).' + extra
       );
     }
 
