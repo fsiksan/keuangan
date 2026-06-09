@@ -1649,6 +1649,19 @@ async function parseAmountToNumber(text) {
   return parseRupiahTextToNumber(t);
 }
 
+// Pastikan semua tab standar ada di spreadsheet tenant aktif (Langganan, Target,
+// Hutang, Neraca, Budget, KategoriMap) — dipakai saat onboarding & /rapikan.
+async function ensureTenantSheets() {
+  await ensureSheetWithHeader(getLanggananSheetName(), LANGGANAN_HEADER);
+  await ensureSheetWithHeader(getTargetSheetName(), ['Nama', 'Target', 'Terkumpul']);
+  await ensureSheetWithHeader(getHutangSheetName(), ['Nama', 'Jenis', 'Nominal', 'Catatan', 'Tanggal']);
+  await ensureSheetWithHeader(getNeracaSheetName(), NERACA_HEADER);
+  await ensureSheetWithHeader(getBudgetSheetName(), ['Kategori', 'Budget Bulanan']);
+  if (!isMultiTenant()) {
+    await ensureSheetWithHeader(getKategoriMapSheetName(), ['Kata Kunci', 'Kategori']);
+  }
+}
+
 // ----- Pemetaan kategori custom -----
 
 async function loadCustomCategoryRules() {
@@ -3633,6 +3646,17 @@ bot.command('buatkan', async (ctx) => {
     // 3) Daftarkan ke sheet Pelanggan.
     await upsertPelanggan({ userId, nama, email, spreadsheetId: newId, aktifSampai, sheetName });
 
+    // 4) Siapkan semua tab standar + format awal di spreadsheet pelanggan.
+    try {
+      await tenantStore.run({ spreadsheetId: newId, sheetName }, async () => {
+        await ensureHeader();
+        await ensureTenantSheets();
+        await formatSheetLayout();
+      });
+    } catch (e) {
+      logError('Gagal menyiapkan tab pelanggan baru.', e);
+    }
+
     const link = 'https://docs.google.com/spreadsheets/d/' + newId + '/edit';
     return ctx.reply(
       'Beres! ✅ Pelanggan siap pakai.\n\n' +
@@ -3809,6 +3833,7 @@ bot.command('rapikan', async (ctx) => {
     await ctx.reply(`⏳ Merapikan ${label} ...`);
     await tenantStore.run({ spreadsheetId: targetSs, sheetName: targetSheet }, async () => {
       await ensureHeader();
+      try { await ensureTenantSheets(); } catch (e) { logError('Rapikan: buat tab gagal.', e); }
       await formatSheetLayout();
       try { await updateAnalisaSheet(); } catch (e) { logError('Rapikan: analisa gagal.', e); }
       try { await formatLanggananSheet(); } catch (e) { logError('Rapikan: langganan gagal.', e); }
