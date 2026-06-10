@@ -3234,6 +3234,10 @@ function extractDateToken(text) {
 async function parseTransaction(text) {
   let raw = text.replace(/\s+/g, ' ').trim();
 
+  // Buang tanda baca di akhir kalimat (hasil transkripsi suara sering
+  // diakhiri titik, mis. "Masuk gaji 2 juta." -> regex nominal gagal).
+  raw = raw.replace(/[.!?,;:]+$/, '').trim();
+
   // Ekstrak catatan opsional setelah tanda '#'
   let catatan = '';
   const noteIdx = raw.indexOf('#');
