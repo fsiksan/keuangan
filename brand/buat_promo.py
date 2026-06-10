@@ -132,6 +132,24 @@ def scene_map():
     ])
     return img, (W // 2, 760)
 
+def scene_struk():
+    img = base()
+    draw_bubbles(img, [
+        ("user", "[ Foto struk belanja ]"),
+        ("bot", "Hasil baca struk\nTotal struk: Rp117.500"),
+        ("bot", "Pilih bagianmu (split bill):\n[x] Lunch Box   Rp24.500\n[x] Cup 4 pcs    Rp17.000\n[ ] Cloth Peg    Rp14.500\n\nBagianmu: Rp41.500"),
+    ])
+    return img, (W // 2, 760)
+
+def scene_voice():
+    img = base()
+    draw_bubbles(img, [
+        ("user", "[ Pesan suara  0:03 ]"),
+        ("bot", "\"masuk gaji 5 juta\""),
+        ("bot", "Mantap, tercatat\npemasukan | gaji -> Gaji | Rp5.000.000"),
+    ])
+    return img, (W // 2, 540)
+
 # ---------- caption banner overlay ----------
 def caption_overlay(text):
     """Return RGBA overlay (full canvas) with a rounded caption banner near bottom."""
@@ -250,12 +268,14 @@ def main():
     os.makedirs(OUT_FRAMES)
 
     seq = []
-    crossfade(seq, opening_frames(2.6))
-    img, foc = scene_intro();   crossfade(seq, scene_frames(img, foc, 2.2, 1.0, 1.06, "Catat keuangan cukup dari chat"))
-    img, foc = scene_expense(); crossfade(seq, scene_frames(img, foc, 2.3, 1.12, 1.0, "Tinggal ketik pengeluaranmu"))
-    img, foc = scene_income();  crossfade(seq, scene_frames(img, foc, 2.3, 1.0, 1.1, "Pemasukan pun otomatis tercatat"))
-    img, foc = scene_target();  crossfade(seq, scene_frames(img, foc, 2.5, 1.12, 1.0, "Bikin target & pantau nabung"))
-    img, foc = scene_map();     crossfade(seq, scene_frames(img, foc, 2.5, 1.0, 1.1, "Atur kategori & budget sesukamu"))
+    crossfade(seq, opening_frames(3.6))
+    img, foc = scene_intro();   crossfade(seq, scene_frames(img, foc, 2.1, 1.0, 1.06, "Catat keuangan cukup dari chat"))
+    img, foc = scene_expense(); crossfade(seq, scene_frames(img, foc, 2.2, 1.12, 1.0, "Tinggal ketik pengeluaranmu"))
+    img, foc = scene_income();  crossfade(seq, scene_frames(img, foc, 2.2, 1.0, 1.1, "Pemasukan pun otomatis tercatat"))
+    img, foc = scene_struk();   crossfade(seq, scene_frames(img, foc, 2.7, 1.1, 1.0, "Foto struk + pilih bagianmu (split bill)"))
+    img, foc = scene_voice();   crossfade(seq, scene_frames(img, foc, 2.4, 1.0, 1.1, "Atau cukup catat lewat suara"))
+    img, foc = scene_target();  crossfade(seq, scene_frames(img, foc, 2.3, 1.12, 1.0, "Bikin target & pantau nabung"))
+    img, foc = scene_map();     crossfade(seq, scene_frames(img, foc, 2.3, 1.0, 1.1, "Atur kategori & budget sesukamu"))
     crossfade(seq, outro_frames(3.0))
 
     for i, fr in enumerate(seq):
