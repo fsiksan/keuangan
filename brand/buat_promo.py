@@ -430,6 +430,39 @@ def sheet_analisa_img():
         chart={"h": 300, "values": [120, 50, 25, 22],
                "labels": ["Pokok", "Transp", "Makan", "Jajan"], "colors": g})
 
+def sheet_neraca_img():
+    g = [(46, 125, 92), (224, 122, 95), (70, 157, 107)]
+    return render_sheet(
+        ["Tipe", "Nama", "Nilai", "Sumber"],
+        [
+            ["Aset", "Kas", "Rp1.200.000", "auto"],
+            ["Aset", "Bank BCA", "Rp5.000.000", "auto"],
+            ["Aset", "Gopay", "Rp300.000", "auto"],
+            ["Aset", "Emas", "Rp10.000.000", "manual"],
+            ["Liabilitas", "Cicilan", "Rp2.000.000", "manual"],
+        ],
+        [200, 300, 270, 180], {2},
+        ["Rekap", "Analisa", "Neraca", "Budget", "Langganan", "Target"], "Neraca",
+        "Neraca - Rekap Uang",
+        chart={"h": 290, "values": [16.5, 2.0, 14.5],
+               "labels": ["Aset", "Liabilitas", "Ekuitas"], "colors": g})
+
+def sheet_budget_img():
+    g = [(46, 125, 92), (70, 157, 107), (110, 190, 140), (160, 214, 180)]
+    return render_sheet(
+        ["Kategori", "Budget Bulanan", "Terpakai", "Sisa"],
+        [
+            ["Makanan", "Rp1.000.000", "Rp600.000", "Rp400.000"],
+            ["Transportasi", "Rp500.000", "Rp350.000", "Rp150.000"],
+            ["Kebutuhan Pokok", "Rp1.500.000", "Rp900.000", "Rp600.000"],
+            ["Hiburan", "Rp300.000", "Rp120.000", "Rp180.000"],
+        ],
+        [300, 270, 240, 210], {1, 2, 3},
+        ["Rekap", "Analisa", "Neraca", "Budget", "Langganan", "Target"], "Budget",
+        "Budget - Rekap Uang",
+        chart={"h": 290, "values": [600, 350, 900, 120],
+               "labels": ["Makan", "Transp", "Pokok", "Hibur"], "colors": g})
+
 def main():
     if os.path.exists(OUT_FRAMES): shutil.rmtree(OUT_FRAMES)
     os.makedirs(OUT_FRAMES)
@@ -443,8 +476,10 @@ def main():
     img, foc = scene_voice();   crossfade(seq, scene_frames(img, foc, 2.4, 1.0, 1.1, "Atau cukup catat lewat suara"))
     img, foc = scene_target();  crossfade(seq, scene_frames(img, foc, 2.3, 1.12, 1.0, "Bikin target & pantau nabung"))
     img, foc = scene_map();     crossfade(seq, scene_frames(img, foc, 2.3, 1.0, 1.1, "Atur kategori & budget sesukamu"))
-    crossfade(seq, sheet_pan_scene(sheet_rekap_img(), 4.2, "Semua tercatat lengkap di Google Sheets"))
-    crossfade(seq, sheet_fit_scene(sheet_analisa_img(), 3.2, "Lengkap dengan analisa & grafik"))
+    crossfade(seq, sheet_pan_scene(sheet_rekap_img(), 3.8, "Semua tercatat lengkap di Google Sheets"))
+    crossfade(seq, sheet_fit_scene(sheet_analisa_img(), 2.6, "Analisa & grafik otomatis"))
+    crossfade(seq, sheet_fit_scene(sheet_neraca_img(), 2.5, "Neraca: aset, utang, kekayaan bersih"))
+    crossfade(seq, sheet_fit_scene(sheet_budget_img(), 2.5, "Budget terpantau, anti boros"))
     crossfade(seq, outro_frames(3.0))
 
     for i, fr in enumerate(seq):
