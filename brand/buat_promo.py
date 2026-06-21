@@ -263,6 +263,173 @@ def crossfade(seq, frames, xf=12):
         seq.append(Image.blend(prev[k], head[k], (k + 1) / (xf + 1)))
     seq.extend(frames[xf:])
 
+# ---------- Google Sheets mockup ----------
+SH_W = 1000
+CARD_TOP = 380
+CHROME_H = 58
+
+def _sheet_chart(d, x, y, w, h, values, labels, colors):
+    mx = max(values) or 1
+    n = len(values); gap = 24
+    bw = (w - gap * (n + 1)) / n
+    base = y + h - 34
+    for i, (v, lb, co) in enumerate(zip(values, labels, colors)):
+        bx = x + gap + i * (bw + gap)
+        bh = (h - 64) * (v / mx)
+        d.rounded_rectangle([bx, base - bh, bx + bw, base], radius=8, fill=co)
+        d.text((bx + bw / 2, base + 16), lb, font=F(20, False), fill=(90, 100, 95), anchor="ma")
+
+def render_sheet(headers, rows, colws, money_cols, tabs, active, title, chart=None):
+    gutter = 70; colhdr = 44; title_h = 74; header_h = 60; rowh = 58; tab_h = 84
+    width = gutter + sum(colws)
+    chart_h = chart["h"] if chart else 0
+    height = colhdr + title_h + header_h + rowh * len(rows) + chart_h + tab_h
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, 0, width, colhdr], fill=(248, 249, 250))
+    d.rectangle([0, 0, gutter, height - tab_h], fill=(248, 249, 250))
+    cx = gutter
+    for i, cw in enumerate(colws):
+        d.text((cx + cw / 2, colhdr / 2), chr(65 + i), font=F(20, False), fill=(120, 124, 130), anchor="mm"); cx += cw
+    ty = colhdr
+    d.rectangle([gutter, ty, width, ty + title_h], fill=(46, 125, 92))
+    d.text((width - 20, ty + title_h / 2), title, font=F(34), fill=(255, 255, 255), anchor="rm")
+    hy = ty + title_h
+    d.rectangle([gutter, hy, width, hy + header_h], fill=(214, 237, 222))
+    cx = gutter
+    for hd, cw in zip(headers, colws):
+        d.text((cx + 14, hy + header_h / 2), hd, font=F(24), fill=(20, 40, 30), anchor="lm"); cx += cw
+    ry = hy + header_h
+    for ri, row in enumerate(rows):
+        d.rectangle([gutter, ry, width, ry + rowh], fill=(255, 255, 255) if ri % 2 == 0 else (246, 250, 247))
+        cx = gutter
+        for ci, cw in enumerate(colws):
+            val = str(row[ci]) if ci < len(row) else ""
+            if ci in money_cols and val:
+                d.text((cx + cw - 14, ry + rowh / 2), val, font=F(24, False), fill=(20, 40, 30), anchor="rm")
+            else:
+                d.text((cx + 14, ry + rowh / 2), val, font=F(24, False), fill=(40, 44, 48), anchor="lm")
+            cx += cw
+        ry += rowh
+    d.text((gutter / 2, colhdr + title_h / 2), "1", font=F(18, False), fill=(150, 154, 160), anchor="mm")
+    d.text((gutter / 2, colhdr + title_h + header_h / 2), "2", font=F(18, False), fill=(150, 154, 160), anchor="mm")
+    for ri in range(len(rows)):
+        yy = colhdr + title_h + header_h + ri * rowh + rowh / 2
+        d.text((gutter / 2, yy), str(ri + 3), font=F(18, False), fill=(150, 154, 160), anchor="mm")
+    if chart:
+        _sheet_chart(d, gutter + 30, ry + 14, width - gutter - 60, chart["h"] - 34, chart["values"], chart["labels"], chart["colors"])
+        ry += chart["h"]
+    cx = gutter
+    for cw in colws:
+        cx += cw; d.line([cx, colhdr, cx, ry], fill=(228, 230, 233), width=1)
+    yy = colhdr
+    for hh in [title_h, header_h] + [rowh] * len(rows):
+        yy += hh; d.line([gutter, yy, width, yy], fill=(228, 230, 233), width=1)
+    d.line([gutter, colhdr, gutter, height - tab_h], fill=(218, 220, 224), width=1)
+    by = height - tab_h
+    d.rectangle([0, by, width, height], fill=(241, 243, 244))
+    tx = 30
+    for tb in tabs:
+        tf = F(26) if tb == active else F(26, False)
+        tw = d.textlength(tb, font=tf)
+        d.text((tx, by + tab_h / 2), tb, font=tf, fill=(46, 125, 92) if tb == active else (95, 99, 104), anchor="lm")
+        if tb == active:
+            d.rectangle([tx - 6, by, tx + tw + 6, by + 5], fill=(46, 125, 92))
+        tx += tw + 50
+    return img
+
+def browser_card(viewport):
+    base = green_bg()
+    d = ImageDraw.Draw(base)
+    vw, vh = viewport.size
+    card_x = (W - vw) // 2; card_y = CARD_TOP
+    d.rounded_rectangle([card_x + 10, card_y - CHROME_H + 16, card_x + vw + 10, card_y + vh + 16], radius=24, fill=(18, 78, 54))
+    d.rounded_rectangle([card_x, card_y - CHROME_H, card_x + vw, card_y + vh], radius=22, fill=(255, 255, 255))
+    d.rounded_rectangle([card_x, card_y - CHROME_H, card_x + vw, card_y - CHROME_H + 46], radius=22, fill=(236, 238, 240))
+    d.rectangle([card_x, card_y - 24, card_x + vw, card_y], fill=(236, 238, 240))
+    for k, co in enumerate([(237, 106, 94), (245, 191, 79), (98, 197, 108)]):
+        cxx = card_x + 26 + k * 34
+        d.ellipse([cxx, card_y - CHROME_H + 18, cxx + 20, card_y - CHROME_H + 38], fill=co)
+    d.rounded_rectangle([card_x + 130, card_y - CHROME_H + 13, card_x + vw - 26, card_y - CHROME_H + 43], radius=15, fill=(255, 255, 255))
+    d.text((card_x + 150, card_y - CHROME_H + 28), "docs.google.com/spreadsheets", font=F(19, False), fill=(120, 124, 130), anchor="lm")
+    base.paste(viewport.convert("RGB"), (card_x, card_y))
+    return base
+
+def apply_caption(fr_rgba, ov, i, n):
+    fin = 12; fout = 10
+    if i < fin: a = i / fin
+    elif i > n - fout: a = max(0.0, (n - i) / fout)
+    else: a = 1.0
+    dy = int((1 - ease_out(min(1, i / fin))) * 45) if i < fin else 0
+    tmp = ov.copy()
+    if a < 1.0:
+        al = tmp.split()[3].point(lambda p: int(p * a)); tmp.putalpha(al)
+    if dy:
+        sh = Image.new("RGBA", (W, H), (0, 0, 0, 0)); sh.paste(tmp, (0, dy)); tmp = sh
+    return Image.alpha_composite(fr_rgba, tmp)
+
+def sheet_pan_scene(sheet_img, secs, caption, vh=1080):
+    n = int(secs * FPS); frames = []
+    sw, sh = sheet_img.size
+    sc = sheet_img.resize((int(sw * vh / sh), vh), Image.LANCZOS)
+    vw = SH_W; maxpan = max(0, sc.width - vw)
+    ov = caption_overlay(caption) if caption else None
+    for i in range(n):
+        e = ease_inout(i / max(1, n - 1)); x = int(maxpan * e)
+        base = browser_card(sc.crop((x, 0, x + vw, vh)))
+        if ov is not None: base = apply_caption(base.convert("RGBA"), ov, i, n).convert("RGB")
+        frames.append(base)
+    return frames
+
+def sheet_fit_scene(sheet_img, secs, caption, vh=1080, z0=1.0, z1=1.06):
+    n = int(secs * FPS); frames = []
+    sw, sh = sheet_img.size
+    fit = sheet_img.resize((SH_W, int(sh * SH_W / sw)), Image.LANCZOS)
+    canvas = Image.new("RGB", (SH_W, vh), (255, 255, 255)); canvas.paste(fit, (0, 0))
+    ov = caption_overlay(caption) if caption else None
+    for i in range(n):
+        z = z0 + (z1 - z0) * ease_inout(i / max(1, n - 1))
+        cw, ch = int(SH_W / z), int(vh / z)
+        crop = canvas.crop((0, 0, cw, ch)).resize((SH_W, vh), Image.LANCZOS)
+        base = browser_card(crop)
+        if ov is not None: base = apply_caption(base.convert("RGBA"), ov, i, n).convert("RGB")
+        frames.append(base)
+    return frames
+
+def sheet_rekap_img():
+    return render_sheet(
+        ["Tanggal", "Item", "Kategori", "Toko", "Pemasukan", "Pengeluaran", "Catatan", "Pencatat", "Akun", "ID"],
+        [
+            ["9/6/2026", "Gaji", "Gaji", "", "Rp5.000.000", "", "", "Suami", "Kas", "TRX-9A1"],
+            ["9/6/2026", "makan", "Makanan", "warteg", "", "Rp25.000", "makan siang", "Suami", "Gopay", "TRX-9A2"],
+            ["9/6/2026", "bensin", "Transportasi", "SPBU", "", "Rp50.000", "", "Istri", "Bank BCA", "TRX-9A3"],
+            ["10/6/2026", "belanja", "Kebutuhan Pokok", "Indomaret", "", "Rp120.000", "", "Istri", "Bank BCA", "TRX-9A4"],
+            ["10/6/2026", "kopi", "Jajan", "Kopi Kenangan", "", "Rp22.000", "", "Suami", "Gopay", "TRX-9A5"],
+            ["11/6/2026", "bonus", "Gaji", "", "Rp1.000.000", "", "THR", "Suami", "Kas", "TRX-9A6"],
+        ],
+        [150, 210, 200, 190, 200, 200, 210, 150, 150, 220], {4, 5},
+        ["Rekap", "Analisa", "Neraca", "Budget", "Langganan", "Target"], "Rekap",
+        "Rekap Uang by Ikhsan Abdul Nafi'u")
+
+def sheet_analisa_img():
+    g = [(46, 125, 92), (70, 157, 107), (110, 190, 140), (160, 214, 180)]
+    return render_sheet(
+        ["Keterangan", "Nilai", "Persentase"],
+        [
+            ["Total Pemasukan", "Rp6.000.000", ""],
+            ["Total Pengeluaran", "Rp217.000", ""],
+            ["Saldo", "Rp5.783.000", ""],
+            ["Kebutuhan Pokok", "Rp120.000", "55%"],
+            ["Transportasi", "Rp50.000", "23%"],
+            ["Makanan", "Rp25.000", "12%"],
+            ["Jajan", "Rp22.000", "10%"],
+        ],
+        [430, 270, 200], {1},
+        ["Rekap", "Analisa", "Neraca", "Budget", "Langganan", "Target"], "Analisa",
+        "Analisa - Rekap Uang",
+        chart={"h": 300, "values": [120, 50, 25, 22],
+               "labels": ["Pokok", "Transp", "Makan", "Jajan"], "colors": g})
+
 def main():
     if os.path.exists(OUT_FRAMES): shutil.rmtree(OUT_FRAMES)
     os.makedirs(OUT_FRAMES)
@@ -276,6 +443,8 @@ def main():
     img, foc = scene_voice();   crossfade(seq, scene_frames(img, foc, 2.4, 1.0, 1.1, "Atau cukup catat lewat suara"))
     img, foc = scene_target();  crossfade(seq, scene_frames(img, foc, 2.3, 1.12, 1.0, "Bikin target & pantau nabung"))
     img, foc = scene_map();     crossfade(seq, scene_frames(img, foc, 2.3, 1.0, 1.1, "Atur kategori & budget sesukamu"))
+    crossfade(seq, sheet_pan_scene(sheet_rekap_img(), 4.2, "Semua tercatat lengkap di Google Sheets"))
+    crossfade(seq, sheet_fit_scene(sheet_analisa_img(), 3.2, "Lengkap dengan analisa & grafik"))
     crossfade(seq, outro_frames(3.0))
 
     for i, fr in enumerate(seq):
